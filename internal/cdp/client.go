@@ -1,15 +1,18 @@
 package cdp
 
 import (
+	"bufio"
 	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"time"
-
-	"github.com/coder/websocket"
-	"github.com/coder/websocket/wsjson"
 
 	"github.com/odsod/recorder/internal/httpclient"
 )
@@ -24,8 +27,8 @@ func ListTabs(ctx context.Context, port int) ([]Tab, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	url := fmt.Sprintf("http://localhost:%d/json", port)
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	u := fmt.Sprintf("http://localhost:%d/json", port)
+	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -34,7 +37,7 @@ func ListTabs(ctx context.Context, port int) ([]Tab, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -72,11 +75,11 @@ func Eval(ctx context.Context, wsURL string, js string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	conn, err := wsDial(ctx, wsURL)
 	if err != nil {
 		return "", fmt.Errorf("cdp dial: %w", err)
 	}
-	defer conn.CloseNow()
+	defer func() { _ = conn.Close() }()
 
 	req := cdpRequest{
 		ID:     1,
@@ -87,15 +90,139 @@ func Eval(ctx context.Context, wsURL string, js string) (string, error) {
 		},
 	}
 
-	if err := wsjson.Write(ctx, conn, req); err != nil {
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return "", fmt.Errorf("cdp marshal: %w", err)
+	}
+
+	if err := wsWrite(conn, payload); err != nil {
 		return "", fmt.Errorf("cdp write: %w", err)
 	}
 
-	var resp cdpResponse
-	if err := wsjson.Read(ctx, conn, &resp); err != nil {
+	respPayload, err := wsRead(conn)
+	if err != nil {
 		return "", fmt.Errorf("cdp read: %w", err)
 	}
 
-	conn.Close(websocket.StatusNormalClosure, "")
+	var resp cdpResponse
+	if err := json.Unmarshal(respPayload, &resp); err != nil {
+		return "", fmt.Errorf("cdp unmarshal: %w", err)
+	}
+
 	return resp.Result.Result.Value, nil
+}
+
+func wsDial(ctx context.Context, rawURL string) (net.Conn, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, err
+	}
+
+	host := u.Host
+	if u.Port() == "" {
+		host = host + ":80"
+	}
+
+	var d net.Dialer
+	conn, err := d.DialContext(ctx, "tcp", host)
+	if err != nil {
+		return nil, err
+	}
+
+	key := make([]byte, 16)
+	if _, err := rand.Read(key); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+
+	reqPath := u.RequestURI()
+	handshake := "GET " + reqPath + " HTTP/1.1\r\n" +
+		"Host: " + u.Host + "\r\n" +
+		"Upgrade: websocket\r\n" +
+		"Connection: Upgrade\r\n" +
+		"Sec-WebSocket-Key: " + base64.StdEncoding.EncodeToString(key) + "\r\n" +
+		"Sec-WebSocket-Version: 13\r\n" +
+		"\r\n"
+
+	if _, err := conn.Write([]byte(handshake)); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+
+	br := bufio.NewReader(conn)
+	resp, err := http.ReadResponse(br, nil)
+	if err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	_ = resp.Body.Close()
+
+	if resp.StatusCode != http.StatusSwitchingProtocols {
+		_ = conn.Close()
+		return nil, fmt.Errorf("websocket upgrade failed: %d", resp.StatusCode)
+	}
+
+	return conn, nil
+}
+
+func wsWrite(conn net.Conn, payload []byte) error {
+	mask := make([]byte, 4)
+	if _, err := rand.Read(mask); err != nil {
+		return err
+	}
+
+	frame := make([]byte, 0, 14+len(payload))
+	frame = append(frame, 0x81) // FIN + text opcode
+
+	switch {
+	case len(payload) <= 125:
+		frame = append(frame, byte(len(payload))|0x80) // masked
+	case len(payload) <= 65535:
+		frame = append(frame, 126|0x80)
+		frame = binary.BigEndian.AppendUint16(frame, uint16(len(payload)))
+	default:
+		frame = append(frame, 127|0x80)
+		frame = binary.BigEndian.AppendUint64(frame, uint64(len(payload)))
+	}
+
+	frame = append(frame, mask...)
+
+	masked := make([]byte, len(payload))
+	for i, b := range payload {
+		masked[i] = b ^ mask[i%4]
+	}
+	frame = append(frame, masked...)
+
+	_, err := conn.Write(frame)
+	return err
+}
+
+func wsRead(conn net.Conn) ([]byte, error) {
+	header := make([]byte, 2)
+	if _, err := io.ReadFull(conn, header); err != nil {
+		return nil, err
+	}
+
+	payloadLen := int(header[1] & 0x7F)
+	switch payloadLen {
+	case 126:
+		ext := make([]byte, 2)
+		if _, err := io.ReadFull(conn, ext); err != nil {
+			return nil, err
+		}
+		payloadLen = int(binary.BigEndian.Uint16(ext))
+	case 127:
+		ext := make([]byte, 8)
+		if _, err := io.ReadFull(conn, ext); err != nil {
+			return nil, err
+		}
+		payloadLen = int(binary.BigEndian.Uint64(ext))
+	}
+
+	payload := make([]byte, payloadLen)
+	if _, err := io.ReadFull(conn, payload); err != nil {
+		return nil, err
+	}
+
+	return payload, nil
 }
