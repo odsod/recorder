@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -22,9 +21,9 @@ func Run(args []string) error {
 	if len(args) > 0 {
 		text = strings.Join(args, " ")
 	} else {
-		text, err = prompt()
+		text, err = stdinPrompt()
 		if err != nil {
-			return nil
+			return err
 		}
 	}
 
@@ -41,31 +40,6 @@ func Run(args []string) error {
 	return nil
 }
 
-func prompt() (string, error) {
-	if kdialogAvailable() {
-		return kdialogPrompt()
-	}
-	return stdinPrompt()
-}
-
-func kdialogAvailable() bool {
-	_, err := exec.LookPath("kdialog")
-	return err == nil
-}
-
-func kdialogPrompt() (string, error) {
-	cmd := exec.Command("kdialog",
-		"--title", "Note",
-		"--geometry", "420",
-		"--inputbox", "Note:",
-	)
-	out, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return string(out), nil
-}
-
 func stdinPrompt() (string, error) {
 	fmt.Print("Note: ")
 	scanner := bufio.NewScanner(os.Stdin)
@@ -77,7 +51,7 @@ func stdinPrompt() (string, error) {
 
 func noteLines(text string) []string {
 	var lines []string
-	for _, line := range strings.Split(text, "\n") {
+	for line := range strings.SplitSeq(text, "\n") {
 		line = strings.TrimSpace(line)
 		if line != "" {
 			lines = append(lines, line)
