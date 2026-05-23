@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/odsod/recorder/internal/transcribe"
@@ -31,10 +30,13 @@ func (r *Recorder) transcribeChunk(ctx context.Context, chunk AudioChunk) {
 		r.log(fmt.Sprintf("transcribe mic: %v", err))
 	}
 
-	timestamp := chunk.StartTime.Format("15:04:05")
 	r.flushSignalEvents(chunk.StartTime, chunk.EndTime)
 
 	speakers := r.speakerTimeline.SpeakersIn(chunk.StartTime, chunk.EndTime)
+	speaker := ""
+	if len(speakers) > 0 {
+		speaker = speakers[0]
+	}
 
 	switch {
 	case sysText != "":
@@ -46,10 +48,16 @@ func (r *Recorder) transcribeChunk(ctx context.Context, chunk AudioChunk) {
 			cleaned = sysText
 		}
 		if cleaned != "" {
-			r.transcript.Append(timestamp, "\U0001f50a sys", cleaned, speakers)
+			e := transcript.Event{
+				Time:    chunk.StartTime,
+				Type:    transcript.Speech,
+				Source:  "sys",
+				Text:    cleaned,
+				Speaker: speaker,
+			}
+			r.appendEvent(e)
 			r.lastSystemText = cleaned
-			r.log(transcript.FormatMessage("\U0001f50a sys", truncate(cleaned, 80), speakers))
-			r.segmenter.OnSpeech(chunk.StartTime, "sys", cleaned)
+			r.segmenter.OnSpeech(e)
 
 			if micText != "" && !transcribe.TextsOverlap(cleaned, micText, r.cfg.Dedup.Threshold) {
 				micCleaned, err := transcribe.CleanupText(ctx, micText, r.cfg.LLM)
@@ -60,9 +68,15 @@ func (r *Recorder) transcribeChunk(ctx context.Context, chunk AudioChunk) {
 					micCleaned = micText
 				}
 				if micCleaned != "" {
-					r.transcript.Append(timestamp, "\U0001f3a4 mic", micCleaned, speakers)
-					r.log(transcript.FormatMessage("\U0001f3a4 mic", truncate(micCleaned, 80), nil))
-					r.segmenter.OnSpeech(chunk.StartTime, "mic", micCleaned)
+					me := transcript.Event{
+						Time:    chunk.StartTime,
+						Type:    transcript.Speech,
+						Source:  "mic",
+						Text:    micCleaned,
+						Speaker: speaker,
+					}
+					r.appendEvent(me)
+					r.segmenter.OnSpeech(me)
 				}
 			}
 		}
@@ -78,9 +92,15 @@ func (r *Recorder) transcribeChunk(ctx context.Context, chunk AudioChunk) {
 				cleaned = micText
 			}
 			if cleaned != "" {
-				r.transcript.Append(timestamp, "\U0001f3a4 mic", cleaned, speakers)
-				r.log(transcript.FormatMessage("\U0001f3a4 mic", truncate(cleaned, 80), nil))
-				r.segmenter.OnSpeech(chunk.StartTime, "mic", cleaned)
+				e := transcript.Event{
+					Time:    chunk.StartTime,
+					Type:    transcript.Speech,
+					Source:  "mic",
+					Text:    cleaned,
+					Speaker: speaker,
+				}
+				r.appendEvent(e)
+				r.segmenter.OnSpeech(e)
 			}
 		}
 	default:
@@ -93,27 +113,27 @@ func (r *Recorder) flushSignalEvents(start, end time.Time) {
 	r.lastFlushedTime = end
 
 	if title, changedAt, ok := r.meetingState.Consume(); ok {
-		ts := changedAt.Format("15:04:05")
+		e := transcript.Event{
+			Time:  changedAt,
+			Type:  transcript.Meeting,
+			Title: title,
+		}
+		r.appendEvent(e)
+		r.segmenter.OnEvent(e)
 		if title != "" {
-			msg := "joined: " + title
-			r.transcript.Append(ts, "\U0001fa9f mtg", msg, nil)
-			r.log(transcript.FormatMessage("\U0001fa9f mtg", msg, nil))
-			r.segmenter.OnSignal(changedAt, "mtg", "\U0001fa9f", msg)
 			r.segmenter.OnMeetingChange(title, changedAt)
-		} else {
-			r.transcript.Append(ts, "\U0001fa9f mtg", "ended", nil)
-			r.log(transcript.FormatMessage("\U0001fa9f mtg", "ended", nil))
-			r.segmenter.OnSignal(changedAt, "mtg", "\U0001fa9f", "ended")
 		}
 	}
 
 	allParticipants := r.participantSet.GetAll()
 	if len(allParticipants) > 0 && !setsEqual(allParticipants, r.lastPplSet) {
 		r.lastPplSet = allParticipants
-		ts := start.Format("15:04:05")
-		names := strings.Join(slices.Sorted(maps.Keys(allParticipants)), ", ")
-		r.transcript.Append(ts, "\U0001f465 ppl", names, nil)
-		r.log(transcript.FormatMessage("\U0001f465 ppl", names, nil))
-		r.segmenter.OnSignal(start, "ppl", "\U0001f465", names)
+		e := transcript.Event{
+			Time:   start,
+			Type:   transcript.Participants,
+			People: slices.Sorted(maps.Keys(allParticipants)),
+		}
+		r.appendEvent(e)
+		r.segmenter.OnEvent(e)
 	}
 }

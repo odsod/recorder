@@ -17,6 +17,7 @@ import (
 	"github.com/odsod/recorder/internal/config"
 	"github.com/odsod/recorder/internal/httpclient"
 	"github.com/odsod/recorder/internal/segment"
+	"github.com/odsod/recorder/internal/transcript"
 )
 
 const (
@@ -226,21 +227,15 @@ func doLLMCall(ctx context.Context, system, user string, cfg config.LLMConfig) (
 	return parsed, nil
 }
 
-// ExtractParticipants extracts unique participant names from ppl events.
+// ExtractParticipants extracts unique participant names from participant events.
 func ExtractParticipants(seg segment.Segment) []string {
 	names := make(map[string]struct{})
-	pplRe := regexp.MustCompile(`\s*\([^)]*\)`)
 	for _, e := range seg.Events {
-		if e.Tag != "ppl" {
+		if e.Type != transcript.Participants {
 			continue
 		}
-		text := pplRe.ReplaceAllString(e.Text, "")
-		text = strings.TrimSuffix(text, " joined")
-		for name := range strings.SplitSeq(text, ",") {
-			name = strings.TrimSpace(name)
-			if name != "" {
-				names[name] = struct{}{}
-			}
+		for _, name := range e.People {
+			names[name] = struct{}{}
 		}
 	}
 	sorted := make([]string, 0, len(names))

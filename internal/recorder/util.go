@@ -1,5 +1,12 @@
 package recorder
 
+import "github.com/odsod/recorder/internal/transcript"
+
+func (r *Recorder) appendEvent(e transcript.Event) {
+	r.transcript.AppendEvent(e)
+	r.log(e.String())
+}
+
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s

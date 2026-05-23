@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/odsod/recorder/internal/config"
+	"github.com/odsod/recorder/internal/recorder"
 	"github.com/odsod/recorder/internal/transcript"
 )
 
@@ -32,10 +33,10 @@ func Run(args []string) error {
 		return nil
 	}
 
-	t := transcript.New(cfg.Transcript.OutputDir)
-	timestamp := time.Now().Format("15:04:05")
+	w := recorder.NewTranscriptWriter(cfg.Transcript.OutputDir)
+	now := time.Now()
 	for _, line := range lines {
-		t.Append(timestamp, "\U0001f4dd nfo", line, nil)
+		w.AppendEvent(transcript.Event{Time: now, Type: transcript.Note, Text: line})
 	}
 	return nil
 }
