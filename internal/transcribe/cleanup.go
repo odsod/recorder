@@ -46,7 +46,7 @@ var hallucinationPrefixes = []string{
 
 func CleanupText(ctx context.Context, text string, cfg config.LLMConfig) (string, error) {
 	payload := map[string]any{
-		"model": "default",
+		"model": cfg.Model,
 		"messages": []map[string]string{
 			{"role": "system", "content": cleanupPrompt},
 			{"role": "user", "content": text},

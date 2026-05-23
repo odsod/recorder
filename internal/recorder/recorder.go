@@ -3,7 +3,6 @@ package recorder
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -17,8 +16,7 @@ import (
 )
 
 const (
-	speakerTimelineMaxAgeSecs = 600  // 10 minutes
-	windowTimelineMaxAgeSecs  = 7200 // 2 hours
+	speakerTimelineMaxAgeSecs = 600 // 10 minutes
 	audioChunkBufferSize      = 8
 )
 
@@ -28,7 +26,7 @@ type Recorder struct {
 	lk              *lock.RecorderLock
 	speakerTimeline *timeline.SpeakerTimeline
 	participantSet  *timeline.ParticipantSet
-	windowTimeline  *timeline.WindowTimeline
+	meetingState    *timeline.MeetingState
 	silenceMonitor  *signals.SilenceMonitor
 	segmenter       *segment.IncrementalSegmenter
 	lastSystemText  string
@@ -45,15 +43,13 @@ func New(ctx context.Context, cfg config.Config) (*Recorder, error) {
 		return nil, err
 	}
 
-	inboxDir := filepath.Join(config.HomeDir(), "Vaults/odsod/inbox")
-
 	r := &Recorder{
 		cfg:             cfg,
 		transcript:      t,
 		lk:              lk,
 		speakerTimeline: timeline.NewSpeakerTimeline(speakerTimelineMaxAgeSecs),
 		participantSet:  timeline.NewParticipantSet(),
-		windowTimeline:  timeline.NewWindowTimeline(windowTimelineMaxAgeSecs),
+		meetingState:    timeline.NewMeetingState(),
 		silenceMonitor:  signals.NewSilenceMonitor(cfg.Signals.SilenceThresholdSecs),
 		lastPplSet:      make(map[string]struct{}),
 	}
@@ -62,8 +58,8 @@ func New(ctx context.Context, cfg config.Config) (*Recorder, error) {
 		SummarizeFn: func(ctx context.Context, seg segment.Segment, date string) (string, string, bool, error) {
 			return summarize.SummarizeSegment(ctx, seg, cfg.LLM, date)
 		},
-		WriteInboxFn: func(title, summary string, seg segment.Segment, date string) (string, error) {
-			return summarize.WriteInboxDraft(title, summary, seg, date, inboxDir)
+		WriteSegmentFn: func(title, summary string, seg segment.Segment, date string) (string, error) {
+			return summarize.WriteSegmentFile(title, summary, seg, date, cfg.Segments.OutputDir)
 		},
 	}
 	r.segmenter = segment.NewSegmenter(ctx, handler, r.log, func(timestamp, text string) {
@@ -95,17 +91,12 @@ func (r *Recorder) Run(ctx context.Context) error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		signals.RunSpeakerCollector(ctx, r.speakerTimeline, r.participantSet, r.cfg.Signals.CDPPorts, r.log)
-	}()
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		signals.RunWindowCollector(
+		signals.RunSpeakerCollector(
 			ctx,
-			r.windowTimeline,
-			r.cfg.Signals.MeetingWindowPatterns,
-			time.Duration(r.cfg.Signals.KwinPollIntervalSecs)*time.Second,
+			r.speakerTimeline,
+			r.participantSet,
+			r.meetingState,
+			r.cfg.Signals.CDPPorts,
 			r.log,
 		)
 	}()

@@ -164,7 +164,7 @@ func callLLM(ctx context.Context, system, user string, cfg config.LLMConfig) (ma
 
 func doLLMCall(ctx context.Context, system, user string, cfg config.LLMConfig) (map[string]any, error) {
 	payload := map[string]any{
-		"model": "qwen",
+		"model": cfg.Model,
 		"messages": []map[string]string{
 			{"role": "system", "content": system},
 			{"role": "user", "content": user},

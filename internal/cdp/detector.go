@@ -15,9 +15,19 @@ type ParticipantState struct {
 	Speaking bool
 }
 
+type MeetingChange struct {
+	Title string
+}
+
+type PollResult struct {
+	Participants  []ParticipantState
+	MeetingChange *MeetingChange
+}
+
 type SpeakerDetector struct {
 	ports          []int
 	activeWSURL    string
+	activeTitle    string
 	activePlatform *PlatformConfig
 	speakingClass  string
 	prevSnapshot   map[string]map[string]struct{}
@@ -27,35 +37,53 @@ func NewSpeakerDetector(ports []int) *SpeakerDetector {
 	return &SpeakerDetector{ports: ports}
 }
 
-func (d *SpeakerDetector) SpeakingClass() string {
-	return d.speakingClass
-}
-
-func (d *SpeakerDetector) Poll(ctx context.Context) ([]ParticipantState, error) {
-	wsURL, platform, err := d.findMeetingTab(ctx)
+func (d *SpeakerDetector) Poll(ctx context.Context) (PollResult, error) {
+	wsURL, tab, platform, err := d.findMeetingTab(ctx)
 	if err != nil {
-		return nil, err
+		return PollResult{}, err
 	}
-	if wsURL == "" {
-		return nil, nil
-	}
+
+	var result PollResult
 
 	if wsURL != d.activeWSURL {
+		if wsURL == "" && d.activeWSURL != "" {
+			result.MeetingChange = &MeetingChange{Title: ""}
+		} else if wsURL != "" {
+			title := tab.Title
+			if title == "" {
+				title = tab.URL
+			}
+			result.MeetingChange = &MeetingChange{Title: title}
+		}
 		d.activeWSURL = wsURL
+		d.activeTitle = ""
 		d.activePlatform = platform
 		d.speakingClass = ""
 		d.prevSnapshot = nil
 	}
 
-	if d.speakingClass != "" {
-		return d.pollCached(ctx, wsURL, platform)
+	if wsURL == "" {
+		return result, nil
 	}
-	return d.pollDiscovery(ctx, wsURL, platform)
+
+	if tab.Title != d.activeTitle && d.activeTitle != "" {
+		result.MeetingChange = &MeetingChange{Title: tab.Title}
+	}
+	d.activeTitle = tab.Title
+
+	var participants []ParticipantState
+	if d.speakingClass != "" {
+		participants, err = d.pollCached(ctx, wsURL, platform)
+	} else {
+		participants, err = d.pollDiscovery(ctx, wsURL, platform)
+	}
+	result.Participants = participants
+	return result, err
 }
 
-func (d *SpeakerDetector) findMeetingTab(ctx context.Context) (string, *PlatformConfig, error) {
+func (d *SpeakerDetector) findMeetingTab(ctx context.Context) (string, Tab, *PlatformConfig, error) {
 	for _, port := range d.ports {
-		tabs, err := ListTabs(ctx, port)
+		tabs, err := listTabs(ctx, port)
 		if err != nil {
 			continue
 		}
@@ -66,13 +94,13 @@ func (d *SpeakerDetector) findMeetingTab(ctx context.Context) (string, *Platform
 			for i := range Platforms {
 				if strings.Contains(tab.URL, Platforms[i].URLPattern) {
 					if tab.WebSocketDebuggerURL != "" {
-						return tab.WebSocketDebuggerURL, &Platforms[i], nil
+						return tab.WebSocketDebuggerURL, tab, &Platforms[i], nil
 					}
 				}
 			}
 		}
 	}
-	return "", nil, nil
+	return "", Tab{}, nil, nil
 }
 
 func (d *SpeakerDetector) pollCached(
@@ -85,7 +113,7 @@ func (d *SpeakerDetector) pollCached(
 		return nil, nil
 	}
 	js := fmt.Sprintf(platform.PollJSTemplate, d.speakingClass, d.speakingClass)
-	val, err := Eval(ctx, wsURL, js)
+	val, err := eval(ctx, wsURL, js)
 	if err != nil {
 		return nil, err
 	}
@@ -113,7 +141,7 @@ func (d *SpeakerDetector) pollDiscovery(
 	wsURL string,
 	platform *PlatformConfig,
 ) ([]ParticipantState, error) {
-	val, err := Eval(ctx, wsURL, platform.SnapshotJS)
+	val, err := eval(ctx, wsURL, platform.SnapshotJS)
 	if err != nil {
 		return nil, err
 	}

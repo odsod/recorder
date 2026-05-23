@@ -139,60 +139,6 @@ func TestParticipantSet_Reset(tt *testing.T) {
 	assertSet(tt, newNames, setOf("Alice"))
 }
 
-func TestWindowTimeline_EventsBetween(tt *testing.T) {
-	wt := NewWindowTimeline(7200)
-	wt.Append(t("09:00:00"), "Meet - Standup", "opened")
-	wt.Append(t("09:30:00"), "Meet - Standup", "closed")
-
-	events := wt.EventsBetween(t("08:50:00"), t("09:35:00"))
-	if len(events) != 2 {
-		tt.Fatalf("expected 2 events, got %d", len(events))
-	}
-	if events[0].Title != "Meet - Standup" {
-		tt.Errorf("expected title 'Meet - Standup', got %q", events[0].Title)
-	}
-	if events[0].Action != "opened" {
-		tt.Errorf("expected action 'opened', got %q", events[0].Action)
-	}
-}
-
-func TestWindowTimeline_EventsBetweenFilters(tt *testing.T) {
-	wt := NewWindowTimeline(7200)
-	wt.Append(t("09:00:00"), "Meet - Standup", "opened")
-	wt.Append(t("09:30:00"), "Meet - Standup", "closed")
-
-	events := wt.EventsBetween(t("09:10:00"), t("09:25:00"))
-	if len(events) != 0 {
-		tt.Fatalf("expected 0 events, got %d", len(events))
-	}
-}
-
-func TestWindowTimeline_CurrentMeetingOpen(tt *testing.T) {
-	wt := NewWindowTimeline(7200)
-	wt.Append(t("09:00:00"), "Meet - Standup", "opened")
-	if got := wt.CurrentMeeting(); got != "Meet - Standup" {
-		tt.Errorf("expected 'Meet - Standup', got %q", got)
-	}
-}
-
-func TestWindowTimeline_CurrentMeetingClosed(tt *testing.T) {
-	wt := NewWindowTimeline(7200)
-	wt.Append(t("09:00:00"), "Meet - Standup", "opened")
-	wt.Append(t("09:30:00"), "Meet - Standup", "closed")
-	if got := wt.CurrentMeeting(); got != "" {
-		tt.Errorf("expected empty, got %q", got)
-	}
-}
-
-func TestWindowTimeline_CurrentMeetingRenamed(tt *testing.T) {
-	wt := NewWindowTimeline(7200)
-	wt.Append(t("09:00:00"), "Meet", "opened")
-	wt.Append(t("09:01:00"), "Meet - Standup", "renamed")
-	if got := wt.CurrentMeeting(); got != "Meet - Standup" {
-		tt.Errorf("expected 'Meet - Standup', got %q", got)
-	}
-}
-
 func assertStrings(tt *testing.T, got, want []string) {
 	tt.Helper()
 	if len(got) != len(want) {

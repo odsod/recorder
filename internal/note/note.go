@@ -1,6 +1,9 @@
 package note
 
 import (
+	"bufio"
+	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -9,15 +12,20 @@ import (
 	"github.com/odsod/recorder/internal/transcript"
 )
 
-func Run() error {
+func Run(args []string) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
 
-	text, err := prompt()
-	if err != nil {
-		return nil // user cancelled
+	var text string
+	if len(args) > 0 {
+		text = strings.Join(args, " ")
+	} else {
+		text, err = prompt()
+		if err != nil {
+			return nil
+		}
 	}
 
 	lines := noteLines(text)
@@ -34,6 +42,18 @@ func Run() error {
 }
 
 func prompt() (string, error) {
+	if kdialogAvailable() {
+		return kdialogPrompt()
+	}
+	return stdinPrompt()
+}
+
+func kdialogAvailable() bool {
+	_, err := exec.LookPath("kdialog")
+	return err == nil
+}
+
+func kdialogPrompt() (string, error) {
 	cmd := exec.Command("kdialog",
 		"--title", "Note",
 		"--geometry", "420",
@@ -44,6 +64,15 @@ func prompt() (string, error) {
 		return "", err
 	}
 	return string(out), nil
+}
+
+func stdinPrompt() (string, error) {
+	fmt.Print("Note: ")
+	scanner := bufio.NewScanner(os.Stdin)
+	if scanner.Scan() {
+		return scanner.Text(), nil
+	}
+	return "", scanner.Err()
 }
 
 func noteLines(text string) []string {

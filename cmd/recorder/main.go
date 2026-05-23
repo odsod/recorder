@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
@@ -30,7 +29,7 @@ func main() {
 			os.Exit(1)
 		}
 	case "note":
-		if err := note.Run(); err != nil {
+		if err := note.Run(os.Args[2:]); err != nil {
 			fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
 			os.Exit(1)
 		}
@@ -110,7 +109,6 @@ func runSegment() error {
 		if err != nil {
 			return err
 		}
-		inboxDir := filepath.Join(config.HomeDir(), "Vaults/odsod/inbox")
 		date := time.Now().Format("2006-01-02")
 
 		for _, seg := range segments {
@@ -124,7 +122,7 @@ func runSegment() error {
 				fmt.Printf("  %s: skipped\n", seg.ID)
 				continue
 			}
-			filename, err := summarize.WriteInboxDraft(title, summary, seg, date, inboxDir)
+			filename, err := summarize.WriteSegmentFile(title, summary, seg, date, cfg.Segments.OutputDir)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "write error for %s: %v\n", seg.ID, err)
 				continue

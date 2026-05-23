@@ -1,26 +1,24 @@
 {
-  "audio": {
-    "sample_rate": 16000,
-    "format": "s16le"
-  },
   "whisper": {
     "url": "http://localhost:8178/v1/audio/transcriptions",
     "timeout_s": 60
   },
   "llm": {
     "url": "http://localhost:8179/v1/chat/completions",
+    "model": "default",
     "timeout_s": 180
   },
   "transcript": {
-    "output_dir": "~/Vaults/odsod/raw/transcripts"
+    "output_dir": "~/.local/share/recorder/transcripts"
+  },
+  "segments": {
+    "output_dir": "~/.local/share/recorder/segments"
   },
   "dedup": {
     "threshold": 0.6
   },
   "signals": {
     "silence_threshold_secs": 180,
-    "kwin_poll_interval_secs": 10,
-    "meeting_window_patterns": ["meet.google.com"],
     "cdp_ports": [9224, 9223]
   }
 }

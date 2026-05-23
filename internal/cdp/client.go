@@ -18,12 +18,13 @@ import (
 )
 
 type Tab struct {
+	Title                string `json:"title"`
 	URL                  string `json:"url"`
 	Type                 string `json:"type"`
 	WebSocketDebuggerURL string `json:"webSocketDebuggerUrl"`
 }
 
-func ListTabs(ctx context.Context, port int) ([]Tab, error) {
+func listTabs(ctx context.Context, port int) ([]Tab, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
@@ -71,7 +72,7 @@ type cdpResponse struct {
 	} `json:"result"`
 }
 
-func Eval(ctx context.Context, wsURL string, js string) (string, error) {
+func eval(ctx context.Context, wsURL string, js string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 

@@ -11,20 +11,20 @@ const summarizeTimeout = 3 * time.Minute
 
 type SegmentHandler interface {
 	Summarize(ctx context.Context, seg Segment, date string) (title string, summary string, skip bool, err error)
-	WriteInbox(title, summary string, seg Segment, date string) (string, error)
+	WriteSegment(title, summary string, seg Segment, date string) (string, error)
 }
 
 type FuncHandler struct {
-	SummarizeFn  func(ctx context.Context, seg Segment, date string) (string, string, bool, error)
-	WriteInboxFn func(title, summary string, seg Segment, date string) (string, error)
+	SummarizeFn    func(ctx context.Context, seg Segment, date string) (string, string, bool, error)
+	WriteSegmentFn func(title, summary string, seg Segment, date string) (string, error)
 }
 
 func (h *FuncHandler) Summarize(ctx context.Context, seg Segment, date string) (string, string, bool, error) {
 	return h.SummarizeFn(ctx, seg, date)
 }
 
-func (h *FuncHandler) WriteInbox(title, summary string, seg Segment, date string) (string, error) {
-	return h.WriteInboxFn(title, summary, seg, date)
+func (h *FuncHandler) WriteSegment(title, summary string, seg Segment, date string) (string, error) {
+	return h.WriteSegmentFn(title, summary, seg, date)
 }
 
 type IncrementalSegmenter struct {
@@ -172,7 +172,7 @@ func (s *IncrementalSegmenter) summarizeAndWrite(seg Segment) {
 		return
 	}
 
-	filename, err := s.handler.WriteInbox(title, summary, seg, date)
+	filename, err := s.handler.WriteSegment(title, summary, seg, date)
 	if err != nil {
 		s.log(fmt.Sprintf("segmenter error: %v", err))
 		return
