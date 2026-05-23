@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/odsod/recorder/internal/config"
@@ -32,7 +31,6 @@ type Recorder struct {
 	windowTimeline  *timeline.WindowTimeline
 	silenceMonitor  *signals.SilenceMonitor
 	segmenter       *segment.IncrementalSegmenter
-	paused          atomic.Bool
 	lastSystemText  string
 	chunkNum        int
 	lastFlushedTime time.Time
@@ -103,13 +101,13 @@ func (r *Recorder) Run(ctx context.Context) error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		signals.RunWindowCollector(ctx, r.windowTimeline, r.cfg.Signals.MeetingWindowPatterns, time.Duration(r.cfg.Signals.KwinPollIntervalSecs)*time.Second, r.log)
-	}()
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		r.inputLoop(ctx)
+		signals.RunWindowCollector(
+			ctx,
+			r.windowTimeline,
+			r.cfg.Signals.MeetingWindowPatterns,
+			time.Duration(r.cfg.Signals.KwinPollIntervalSecs)*time.Second,
+			r.log,
+		)
 	}()
 
 	r.log("signals started")
@@ -133,4 +131,3 @@ func (r *Recorder) log(msg string) {
 	ts := time.Now().Format("15:04:05")
 	fmt.Printf("[%s] %s\n", ts, msg)
 }
-
