@@ -36,7 +36,9 @@ func TranscribeChunk(ctx context.Context, wavData []byte, filename string, cfg c
 	if err := writer.WriteField("response_format", "json"); err != nil {
 		return "", err
 	}
-	writer.Close()
+	if err := writer.Close(); err != nil {
+		return "", err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(cfg.TimeoutS)*time.Second)
 	defer cancel()
@@ -51,7 +53,7 @@ func TranscribeChunk(ctx context.Context, wavData []byte, filename string, cfg c
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("whisper server returned %d", resp.StatusCode)

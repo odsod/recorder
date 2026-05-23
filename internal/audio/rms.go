@@ -6,12 +6,12 @@ import (
 )
 
 const (
-	SampleRate        = 16000
-	FrameBytes        = SampleRate * 2 // 1 second of s16le mono
+	SampleRate         = 16000
+	FrameBytes         = SampleRate * 2 // 1 second of s16le mono
 	SpeechRMSThreshold = 0.002
 	ChunkRMSThreshold  = 0.0025
-	MinChunkSecs      = 10
-	ChunkMaxSecs      = 45
+	MinChunkSecs       = 10
+	ChunkMaxSecs       = 45
 )
 
 func ComputeRMS(pcm []byte) float64 {

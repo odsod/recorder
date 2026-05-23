@@ -198,8 +198,8 @@ func assertStrings(tt *testing.T, got, want []string) {
 	if len(got) != len(want) {
 		tt.Fatalf("got %v, want %v", got, want)
 	}
-	for i := range got {
-		if got[i] != want[i] {
+	for i, g := range got {
+		if g != want[i] { //nolint:gosec // bounds guaranteed by length check above
 			tt.Fatalf("got %v, want %v", got, want)
 		}
 	}

@@ -1,10 +1,10 @@
 package cdp
 
 type PlatformConfig struct {
-	Name            string
-	URLPattern      string
-	SnapshotJS      string
-	PollJSTemplate  string
+	Name           string
+	URLPattern     string
+	SnapshotJS     string
+	PollJSTemplate string
 }
 
 var MeetPlatform = PlatformConfig{

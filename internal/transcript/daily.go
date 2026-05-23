@@ -32,21 +32,26 @@ func (dt *DailyTranscript) Path() string {
 
 func (dt *DailyTranscript) Append(timestamp, tag, text string, speakers []string) {
 	line := FormatLine(timestamp, tag, text, speakers) + "\n"
-	f, err := os.OpenFile(dt.Path(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(dt.Path(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "transcript open: %v\n", err)
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if _, err := f.WriteString(line); err != nil {
 		fmt.Fprintf(os.Stderr, "transcript write: %v\n", err)
 	}
 }
 
 func (dt *DailyTranscript) initFile() {
-	os.MkdirAll(dt.outputDir, 0755)
+	if err := os.MkdirAll(dt.outputDir, 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "transcript mkdir: %v\n", err)
+		return
+	}
 	header := fmt.Sprintf("---\ndate: %s\ntype: recorder-transcript\n---\n\n", dt.date)
-	os.WriteFile(dt.path, []byte(header), 0644)
+	if err := os.WriteFile(dt.path, []byte(header), 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "transcript init: %v\n", err)
+	}
 }
 
 func FormatMessage(tag, text string, speakers []string) string {
