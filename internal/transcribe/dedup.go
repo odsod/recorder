@@ -29,10 +29,7 @@ func TextsOverlap(textA, textB string, threshold float64) bool {
 
 	tokensA := strings.Fields(a)
 	tokensB := strings.Fields(b)
-	shorter := len(tokensA)
-	if len(tokensB) < shorter {
-		shorter = len(tokensB)
-	}
+	shorter := min(len(tokensB), len(tokensA))
 	if shorter < 3 {
 		return false
 	}

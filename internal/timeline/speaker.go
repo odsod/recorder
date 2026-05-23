@@ -35,16 +35,18 @@ func (t *SpeakerTimeline) SpeakersIn(start, end time.Time) []string {
 	seen := make(map[string]bool)
 	var activeAtStart string
 
+loop:
 	for _, c := range t.changes {
-		if !c.Time.After(start) {
+		switch {
+		case !c.Time.After(start):
 			activeAtStart = c.Name
-		} else if !c.Time.After(end) {
+		case !c.Time.After(end):
 			if c.Name != "" && !seen[c.Name] {
 				seen[c.Name] = true
 				result = append(result, c.Name)
 			}
-		} else {
-			break
+		default:
+			break loop
 		}
 	}
 

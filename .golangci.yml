@@ -12,7 +12,27 @@ formatters:
 
 linters:
   enable:
+    # Enabled by default (explicit for visibility).
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    # Additional linters.
+    - bodyclose
+    - copyloopvar
+    - durationcheck
+    - errorlint
+    - gocritic
     - gosec
+    - intrange
+    - misspell
+    - modernize
+    - nilerr
+    - noctx
+    - nolintlint
+    - perfsprint
+    - unconvert
   settings:
     gosec:
       excludes:

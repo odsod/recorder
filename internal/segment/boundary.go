@@ -3,6 +3,7 @@ package segment
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -117,7 +118,7 @@ func DetectBoundaries(events []Event, now time.Time) []Boundary {
 		if lastTitle != "" && m.title != lastTitle {
 			boundaries = append(boundaries, Boundary{
 				Time:   m.time,
-				Reason: fmt.Sprintf("meeting change → %s", m.title),
+				Reason: "meeting change → " + m.title,
 			})
 		}
 		lastTitle = m.title
@@ -198,13 +199,7 @@ func SplitAtBoundaries(events []Event, boundaries []Boundary) []Segment {
 			}
 		}
 
-		hasSpeech := false
-		for _, e := range segEvents {
-			if IsSpeech(e) {
-				hasSpeech = true
-				break
-			}
-		}
+		hasSpeech := slices.ContainsFunc(segEvents, IsSpeech)
 		if hasSpeech {
 			segments = append(segments, Segment{
 				Start:  start,
@@ -228,8 +223,8 @@ var (
 )
 
 func extractMeetingTitle(text string) string {
-	if strings.HasPrefix(text, "joined: ") {
-		title := strings.TrimPrefix(text, "joined: ")
+	if after, ok := strings.CutPrefix(text, "joined: "); ok {
+		title := after
 		if bareMeetingTitles[title] {
 			return ""
 		}

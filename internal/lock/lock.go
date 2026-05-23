@@ -65,7 +65,7 @@ func (l *RecorderLock) read() (*lockInfo, error) {
 	}
 	var info lockInfo
 	if err := json.Unmarshal(data, &info); err != nil {
-		return nil, nil
+		return nil, err
 	}
 	return &info, nil
 }
