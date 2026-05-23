@@ -52,7 +52,7 @@ func (l *RecorderLock) Heartbeat() error {
 }
 
 func (l *RecorderLock) Release() {
-	os.Remove(l.path)
+	_ = os.Remove(l.path)
 }
 
 func (l *RecorderLock) read() (*lockInfo, error) {
@@ -91,7 +91,7 @@ func (l *RecorderLock) write() error {
 		return err
 	}
 	tmpPath := l.path + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+	if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
 		return err
 	}
 	if err := os.Rename(tmpPath, l.path); err != nil {

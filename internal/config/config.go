@@ -36,7 +36,7 @@ type Config struct {
 	LLM        LLMConfig        `json:"llm"`
 	Transcript TranscriptConfig `json:"transcript"`
 	Dedup      DedupConfig      `json:"dedup"`
-	Signals    SignalsConfig     `json:"signals"`
+	Signals    SignalsConfig    `json:"signals"`
 }
 
 func defaults() Config {

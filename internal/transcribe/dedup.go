@@ -5,8 +5,10 @@ import (
 	"strings"
 )
 
-var nonWordRe = regexp.MustCompile(`[^\w\s]`)
-var multiSpaceRe = regexp.MustCompile(`\s+`)
+var (
+	nonWordRe    = regexp.MustCompile(`[^\w\s]`)
+	multiSpaceRe = regexp.MustCompile(`\s+`)
+)
 
 func normalize(text string) string {
 	s := strings.ToLower(text)

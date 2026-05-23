@@ -18,15 +18,15 @@ func WriteInboxDraft(title, summary string, seg segment.Segment, date, inboxDir 
 
 	var content strings.Builder
 	content.WriteString("---\n")
-	content.WriteString(fmt.Sprintf("title: %q\n", title))
-	content.WriteString(fmt.Sprintf("date: %s\n", date))
-	content.WriteString(fmt.Sprintf("time: %q\n", timeRange))
-	content.WriteString(fmt.Sprintf("duration: %dm\n", durationMin))
+	fmt.Fprintf(&content, "title: %q\n", title)
+	fmt.Fprintf(&content, "date: %s\n", date)
+	fmt.Fprintf(&content, "time: %q\n", timeRange)
+	fmt.Fprintf(&content, "duration: %dm\n", durationMin)
 	content.WriteString("type: segment\n")
-	content.WriteString(fmt.Sprintf("source: \"[[raw/transcripts/%s-recorder.md]]\"\n", date))
+	fmt.Fprintf(&content, "source: \"[[raw/transcripts/%s-recorder.md]]\"\n", date)
 	if len(participants) > 0 {
 		pJSON, _ := json.Marshal(participants)
-		content.WriteString(fmt.Sprintf("participants: %s\n", string(pJSON)))
+		fmt.Fprintf(&content, "participants: %s\n", string(pJSON))
 	}
 	content.WriteString("---\n\n")
 	content.WriteString(summary)
@@ -38,10 +38,10 @@ func WriteInboxDraft(title, summary string, seg segment.Segment, date, inboxDir 
 	path := filepath.Join(inboxDir, filename)
 	tmpPath := path + ".tmp"
 
-	if err := os.MkdirAll(inboxDir, 0755); err != nil {
+	if err := os.MkdirAll(inboxDir, 0o755); err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(tmpPath, []byte(content.String()), 0644); err != nil {
+	if err := os.WriteFile(tmpPath, []byte(content.String()), 0o644); err != nil {
 		return "", err
 	}
 	if err := os.Rename(tmpPath, path); err != nil {
@@ -49,4 +49,3 @@ func WriteInboxDraft(title, summary string, seg segment.Segment, date, inboxDir 
 	}
 	return filename, nil
 }
-

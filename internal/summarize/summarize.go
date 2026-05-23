@@ -18,10 +18,17 @@ import (
 	"github.com/odsod/recorder/internal/segment"
 )
 
-const chunkChars = 35000
-const maxRetries = 2
+const (
+	chunkChars = 35000
+	maxRetries = 2
+)
 
-func SummarizeSegment(ctx context.Context, seg segment.Segment, cfg config.LLMConfig, date string) (title, summary string, skip bool, err error) {
+func SummarizeSegment(
+	ctx context.Context,
+	seg segment.Segment,
+	cfg config.LLMConfig,
+	date string,
+) (title, summary string, skip bool, err error) {
 	transcriptText := segment.FormatTranscript(seg)
 	if strings.TrimSpace(transcriptText) == "" {
 		return "", "", true, nil
@@ -184,7 +191,7 @@ func doLLMCall(ctx context.Context, system, user string, cfg config.LLMConfig) (
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {

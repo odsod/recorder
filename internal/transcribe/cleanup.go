@@ -73,7 +73,7 @@ func CleanupText(ctx context.Context, text string, cfg config.LLMConfig) (string
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {

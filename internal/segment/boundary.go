@@ -16,8 +16,8 @@ const (
 )
 
 var bareMeetingTitles = map[string]bool{
-	"Meet":               true,
-	"Google Meet":        true,
+	"Meet":              true,
+	"Google Meet":       true,
 	"meet.google.com_/": true,
 }
 
@@ -222,8 +222,10 @@ type meetingEvent struct {
 	title string
 }
 
-var meetingTitleRe = regexp.MustCompile(`"([^"]+)"(?:\s+(?:opened|active))?$`)
-var meetingArrowRe = regexp.MustCompile(`→\s*"([^"]+)"`)
+var (
+	meetingTitleRe = regexp.MustCompile(`"([^"]+)"(?:\s+(?:opened|active))?$`)
+	meetingArrowRe = regexp.MustCompile(`→\s*"([^"]+)"`)
+)
 
 func extractMeetingTitle(text string) string {
 	if m := meetingArrowRe.FindStringSubmatch(text); m != nil {
@@ -255,8 +257,10 @@ func meetingEvents(events []Event) []meetingEvent {
 	return meetings
 }
 
-var slugRe = regexp.MustCompile(`[^a-z0-9\s-]`)
-var slugSpaceRe = regexp.MustCompile(`[\s]+`)
+var (
+	slugRe      = regexp.MustCompile(`[^a-z0-9\s-]`)
+	slugSpaceRe = regexp.MustCompile(`[\s]+`)
+)
 
 func Slugify(title string) string {
 	s := strings.ToLower(strings.TrimSpace(title))

@@ -75,7 +75,11 @@ func (d *SpeakerDetector) findMeetingTab(ctx context.Context) (string, *Platform
 	return "", nil, nil
 }
 
-func (d *SpeakerDetector) pollCached(ctx context.Context, wsURL string, platform *PlatformConfig) ([]ParticipantState, error) {
+func (d *SpeakerDetector) pollCached(
+	ctx context.Context,
+	wsURL string,
+	platform *PlatformConfig,
+) ([]ParticipantState, error) {
 	if !validCSSClass.MatchString(d.speakingClass) {
 		d.speakingClass = ""
 		return nil, nil
@@ -104,7 +108,11 @@ func (d *SpeakerDetector) pollCached(ctx context.Context, wsURL string, platform
 	return result, nil
 }
 
-func (d *SpeakerDetector) pollDiscovery(ctx context.Context, wsURL string, platform *PlatformConfig) ([]ParticipantState, error) {
+func (d *SpeakerDetector) pollDiscovery(
+	ctx context.Context,
+	wsURL string,
+	platform *PlatformConfig,
+) ([]ParticipantState, error) {
 	val, err := Eval(ctx, wsURL, platform.SnapshotJS)
 	if err != nil {
 		return nil, err

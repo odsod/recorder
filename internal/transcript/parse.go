@@ -17,7 +17,7 @@ func ParseTranscript(path string) ([]segment.Event, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var events []segment.Event
 	scanner := bufio.NewScanner(f)

@@ -39,7 +39,12 @@ type IncrementalSegmenter struct {
 	wg           sync.WaitGroup
 }
 
-func NewSegmenter(ctx context.Context, handler SegmentHandler, log func(string), appendSeg func(timestamp, text string)) *IncrementalSegmenter {
+func NewSegmenter(
+	ctx context.Context,
+	handler SegmentHandler,
+	log func(string),
+	appendSeg func(timestamp, text string),
+) *IncrementalSegmenter {
 	return &IncrementalSegmenter{
 		ctx:       ctx,
 		handler:   handler,
@@ -187,4 +192,3 @@ func filterAfter(events []Event, t time.Time) []Event {
 	}
 	return result
 }
-
