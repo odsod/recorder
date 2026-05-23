@@ -1,0 +1,222 @@
+package recorder
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"strings"
+	"time"
+
+	"github.com/odsod/recorder/internal/audio"
+	"github.com/odsod/recorder/internal/transcript"
+)
+
+type captureAction int
+
+const (
+	actionNone captureAction = iota
+	actionEmit
+	actionDiscard
+)
+
+type captureState struct {
+	sysBuf                []byte
+	micBuf                []byte
+	hasSpeech             bool
+	consecutiveSilentSecs int
+	wasSpeech             bool
+	chunkStartTime        time.Time
+}
+
+func (s *captureState) reset() {
+	s.sysBuf = s.sysBuf[:0]
+	s.micBuf = s.micBuf[:0]
+	s.hasSpeech = false
+	s.consecutiveSilentSecs = 0
+	s.wasSpeech = false
+	s.chunkStartTime = time.Time{}
+}
+
+func (s *captureState) ingest(sysData, micData []byte) {
+	if s.chunkStartTime.IsZero() {
+		s.chunkStartTime = time.Now()
+	}
+	s.sysBuf = append(s.sysBuf, sysData...)
+	s.micBuf = append(s.micBuf, micData...)
+}
+
+func (s *captureState) recordSpeech() {
+	s.hasSpeech = true
+	s.consecutiveSilentSecs = 0
+}
+
+func (s *captureState) recordSilence() {
+	s.consecutiveSilentSecs++
+}
+
+func (s *captureState) action() captureAction {
+	bufSecs := len(s.sysBuf) / audio.FrameBytes
+
+	if !s.hasSpeech && bufSecs >= 5 {
+		return actionDiscard
+	}
+
+	if s.hasSpeech && bufSecs >= audio.MinChunkSecs {
+		if s.consecutiveSilentSecs >= 1 {
+			return actionEmit
+		}
+		if bufSecs >= audio.ChunkMaxSecs {
+			return actionEmit
+		}
+	}
+	return actionNone
+}
+
+func (s *captureState) trimmedPCM() (sys, mic []byte) {
+	trimBytes := max(0, s.consecutiveSilentSecs-1) * audio.FrameBytes
+	if trimBytes > 0 && trimBytes < len(s.sysBuf) {
+		return s.sysBuf[:len(s.sysBuf)-trimBytes], s.micBuf[:len(s.micBuf)-trimBytes]
+	}
+	return s.sysBuf, s.micBuf
+}
+
+func (r *Recorder) captureLoop(ctx context.Context, chunkCh chan<- AudioChunk) {
+	monitor, err := audio.GetMonitorSource(ctx)
+	if err != nil {
+		r.log(fmt.Sprintf("ERROR: %v", err))
+		return
+	}
+	micSource, err := audio.GetMicSource(ctx)
+	if err != nil {
+		r.log(fmt.Sprintf("ERROR: %v", err))
+		return
+	}
+	r.log(fmt.Sprintf("system: %s", monitor))
+	r.log(fmt.Sprintf("mic: %s", micSource))
+
+	sysCmd, sysReader, err := audio.StartParec(ctx, monitor, audio.SampleRate)
+	if err != nil {
+		r.log(fmt.Sprintf("ERROR starting sys parec: %v", err))
+		return
+	}
+	micCmd, micReader, err := audio.StartParec(ctx, micSource, audio.SampleRate)
+	if err != nil {
+		r.log(fmt.Sprintf("ERROR starting mic parec: %v", err))
+		sysCmd.Process.Kill()
+		return
+	}
+
+	defer func() {
+		sysCmd.Process.Kill()
+		sysCmd.Wait()
+		micCmd.Process.Kill()
+		micCmd.Wait()
+	}()
+
+	var state captureState
+	r.log("listening")
+
+	for {
+		select {
+		case <-ctx.Done():
+			if state.hasSpeech && len(state.sysBuf) >= audio.MinChunkSecs*audio.FrameBytes {
+				r.emitChunk(state.sysBuf, state.micBuf, state.chunkStartTime, chunkCh)
+			}
+			return
+		default:
+		}
+
+		if r.paused.Load() {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(500 * time.Millisecond):
+			}
+			continue
+		}
+
+		if err := r.lk.Heartbeat(); err != nil {
+			r.log(fmt.Sprintf("heartbeat: %v", err))
+		}
+
+		sysData, err := audio.ReadFrame(sysReader)
+		if err != nil {
+			if err != io.EOF {
+				r.log(fmt.Sprintf("sys read error: %v", err))
+			}
+			r.log("system audio ended")
+			return
+		}
+		micData, err := audio.ReadFrame(micReader)
+		if err != nil {
+			micData = audio.SilentFrame()
+		}
+
+		state.ingest(sysData, micData)
+
+		sysRMS := audio.ComputeRMS(sysData)
+		micRMS := audio.ComputeRMS(micData)
+		secondHasSpeech := sysRMS >= audio.SpeechRMSThreshold || micRMS >= audio.SpeechRMSThreshold
+
+		if secondHasSpeech {
+			if !state.wasSpeech {
+				var src []string
+				if sysRMS >= audio.SpeechRMSThreshold {
+					src = append(src, fmt.Sprintf("sys=%.4f", sysRMS))
+				}
+				if micRMS >= audio.SpeechRMSThreshold {
+					src = append(src, fmt.Sprintf("mic=%.4f", micRMS))
+				}
+				r.log(fmt.Sprintf("speech detected (%s)", strings.Join(src, ", ")))
+				state.wasSpeech = true
+			}
+			state.recordSpeech()
+			r.silenceMonitor.Reset()
+		} else {
+			if state.wasSpeech && state.consecutiveSilentSecs == 1 {
+				r.log("silence")
+				state.wasSpeech = false
+			}
+			state.recordSilence()
+			if r.silenceMonitor.Tick(state.consecutiveSilentSecs) {
+				mins := state.consecutiveSilentSecs / 60
+				ts := time.Now().Format("15:04:05")
+				r.transcript.Append(ts, "💤 idl", fmt.Sprintf("%d min", mins), nil)
+				r.log(transcript.FormatMessage("💤 idl", fmt.Sprintf("%d min", mins), nil))
+			}
+			r.segmenter.OnSilence(state.consecutiveSilentSecs)
+		}
+
+		switch state.action() {
+		case actionDiscard:
+			state.reset()
+		case actionEmit:
+			sys, mic := state.trimmedPCM()
+			r.emitChunk(sys, mic, state.chunkStartTime, chunkCh)
+			state.reset()
+		}
+	}
+}
+
+func (r *Recorder) emitChunk(sysPCM, micPCM []byte, startTime time.Time, chunkCh chan<- AudioChunk) {
+	r.chunkNum++
+	endTime := time.Now()
+	duration := len(sysPCM) / audio.FrameBytes
+	sysRMS := audio.ComputeRMS(sysPCM)
+	micRMS := audio.ComputeRMS(micPCM)
+
+	if sysRMS < audio.ChunkRMSThreshold && micRMS < audio.ChunkRMSThreshold {
+		r.log(fmt.Sprintf("chunk #%d: %ds sys=%.4f mic=%.4f (below threshold, skipped)",
+			r.chunkNum, duration, sysRMS, micRMS))
+		return
+	}
+
+	r.log(fmt.Sprintf("chunk #%d: %ds sys=%.4f mic=%.4f", r.chunkNum, duration, sysRMS, micRMS))
+
+	chunkCh <- AudioChunk{
+		SysWAV:    audio.MakeWAV(sysPCM, audio.SampleRate),
+		MicWAV:    audio.MakeWAV(micPCM, audio.SampleRate),
+		StartTime: startTime,
+		EndTime:   endTime,
+	}
+}
