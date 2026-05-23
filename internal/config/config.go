@@ -13,10 +13,15 @@ type WhisperConfig struct {
 
 type LLMConfig struct {
 	URL      string `json:"url"`
+	Model    string `json:"model"`
 	TimeoutS int    `json:"timeout_s"`
 }
 
 type TranscriptConfig struct {
+	OutputDir string `json:"output_dir"`
+}
+
+type SegmentsConfig struct {
 	OutputDir string `json:"output_dir"`
 }
 
@@ -25,16 +30,15 @@ type DedupConfig struct {
 }
 
 type SignalsConfig struct {
-	SilenceThresholdSecs  int      `json:"silence_threshold_secs"`
-	KwinPollIntervalSecs  int      `json:"kwin_poll_interval_secs"`
-	MeetingWindowPatterns []string `json:"meeting_window_patterns"`
-	CDPPorts              []int    `json:"cdp_ports"`
+	SilenceThresholdSecs int   `json:"silence_threshold_secs"`
+	CDPPorts             []int `json:"cdp_ports"`
 }
 
 type Config struct {
 	Whisper    WhisperConfig    `json:"whisper"`
 	LLM        LLMConfig        `json:"llm"`
 	Transcript TranscriptConfig `json:"transcript"`
+	Segments   SegmentsConfig   `json:"segments"`
 	Dedup      DedupConfig      `json:"dedup"`
 	Signals    SignalsConfig    `json:"signals"`
 }
@@ -47,19 +51,21 @@ func defaults() Config {
 		},
 		LLM: LLMConfig{
 			URL:      "http://localhost:8179/v1/chat/completions",
+			Model:    "default",
 			TimeoutS: 180,
 		},
 		Transcript: TranscriptConfig{
-			OutputDir: filepath.Join(HomeDir(), "Vaults/odsod/raw/transcripts"),
+			OutputDir: filepath.Join(DataDir(), "recorder", "transcripts"),
+		},
+		Segments: SegmentsConfig{
+			OutputDir: filepath.Join(DataDir(), "recorder", "segments"),
 		},
 		Dedup: DedupConfig{
 			Threshold: 0.6,
 		},
 		Signals: SignalsConfig{
-			SilenceThresholdSecs:  180,
-			KwinPollIntervalSecs:  10,
-			MeetingWindowPatterns: []string{"meet.google.com"},
-			CDPPorts:              []int{9224, 9223},
+			SilenceThresholdSecs: 180,
+			CDPPorts:             []int{9224, 9223},
 		},
 	}
 }
@@ -67,7 +73,7 @@ func defaults() Config {
 func Load() (Config, error) {
 	cfg := defaults()
 
-	configPath := filepath.Join(HomeDir(), ".config/recorder/config.json")
+	configPath := filepath.Join(ConfigDir(), "recorder", "config.json")
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -81,6 +87,7 @@ func Load() (Config, error) {
 	}
 
 	cfg.Transcript.OutputDir = expandHome(cfg.Transcript.OutputDir)
+	cfg.Segments.OutputDir = expandHome(cfg.Segments.OutputDir)
 
 	return cfg, nil
 }
@@ -95,4 +102,20 @@ func expandHome(path string) string {
 func HomeDir() string {
 	home, _ := os.UserHomeDir()
 	return home
+}
+
+func ConfigDir() string {
+	return envDir("XDG_CONFIG_HOME", filepath.Join(HomeDir(), ".config"))
+}
+
+func DataDir() string {
+	return envDir("XDG_DATA_HOME", filepath.Join(HomeDir(), ".local", "share"))
+}
+
+func envDir(name, fallback string) string {
+	dir := expandHome(os.Getenv(name))
+	if dir != "" && filepath.IsAbs(dir) {
+		return dir
+	}
+	return fallback
 }

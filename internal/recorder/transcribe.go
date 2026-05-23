@@ -89,25 +89,20 @@ func (r *Recorder) transcribeChunk(ctx context.Context, chunk AudioChunk) {
 }
 
 func (r *Recorder) flushSignalEvents(start, end time.Time) {
-	flushStart := r.lastFlushedTime
-	if flushStart.IsZero() {
-		flushStart = start
-	}
 	r.lastFlushedTime = end
 
-	windowEvents := r.windowTimeline.EventsBetween(flushStart, end)
-	for _, we := range windowEvents {
-		ts := we.Time.Format("15:04:05")
-		msg := fmt.Sprintf("\"%s\" %s", we.Title, we.Action)
-		r.transcript.Append(ts, "\U0001fa9f win", msg, nil)
-		r.log(transcript.FormatMessage("\U0001fa9f win", msg, nil))
-		r.segmenter.OnSignal(we.Time, "win", "\U0001fa9f", msg)
-
-		if we.Action == "opened" || we.Action == "renamed" || we.Action == "active" {
-			current := r.windowTimeline.CurrentMeeting()
-			if current != "" {
-				r.segmenter.OnMeetingChange(current, we.Time)
-			}
+	if title, changedAt, ok := r.meetingState.Consume(); ok {
+		ts := changedAt.Format("15:04:05")
+		if title != "" {
+			msg := fmt.Sprintf("joined: %s", title)
+			r.transcript.Append(ts, "\U0001fa9f mtg", msg, nil)
+			r.log(transcript.FormatMessage("\U0001fa9f mtg", msg, nil))
+			r.segmenter.OnSignal(changedAt, "mtg", "\U0001fa9f", msg)
+			r.segmenter.OnMeetingChange(title, changedAt)
+		} else {
+			r.transcript.Append(ts, "\U0001fa9f mtg", "ended", nil)
+			r.log(transcript.FormatMessage("\U0001fa9f mtg", "ended", nil))
+			r.segmenter.OnSignal(changedAt, "mtg", "\U0001fa9f", "ended")
 		}
 	}
 

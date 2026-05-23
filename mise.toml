@@ -1,35 +1,31 @@
-# recorder mise configuration
-#
-# Usage examples:
-#   mise install                # Install all tools
-#   mise run build              # Full CI build
-#   mise run lint               # Run linter
-#   mise run test               # Run tests
-
 [tools]
 go = "1.26"
 golangci-lint = "2.12"
 
 [tasks.build]
-description = "run full CI build"
+description = "Full CI build (lint, test, tidy, diff)"
 run = "mise run lint && mise run test && mise run tidy && mise run diff"
 
 [tasks.lint]
-description = "lint Go code"
+description = "Lint Go code"
 run = "golangci-lint run --fix"
 
 [tasks.test]
-description = "run Go tests"
+description = "Run Go tests"
 run = "go test -v -cover ./..."
 
 [tasks.tidy]
-description = "tidy Go mod file"
+description = "Tidy Go modules"
 run = "go mod tidy -v"
 
 [tasks.diff]
-description = "check for git diffs"
+description = "Check for uncommitted diffs (CI gate)"
 run = """
 if git rev-parse --is-inside-work-tree &>/dev/null && ! jj root &>/dev/null; then
   git diff --exit-code
 fi
 """
+
+[tasks.install]
+description = "Build and install recorder binary"
+run = "go build -o ~/.local/bin/recorder ./cmd/recorder"

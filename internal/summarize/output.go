@@ -10,7 +10,7 @@ import (
 	"github.com/odsod/recorder/internal/segment"
 )
 
-func WriteInboxDraft(title, summary string, seg segment.Segment, date, inboxDir string) (string, error) {
+func WriteSegmentFile(title, summary string, seg segment.Segment, date, outputDir string) (string, error) {
 	durationMin := int(seg.End.Sub(seg.Start).Seconds() / 60)
 	timeRange := fmt.Sprintf("%s–%s", seg.Start.Format("15:04"), seg.End.Format("15:04"))
 	slug := segment.Slugify(title)
@@ -35,10 +35,10 @@ func WriteInboxDraft(title, summary string, seg segment.Segment, date, inboxDir 
 	content.WriteString("\n")
 
 	filename := fmt.Sprintf("%s-%s-%s.md", date, seg.ID, slug)
-	path := filepath.Join(inboxDir, filename)
+	path := filepath.Join(outputDir, filename)
 	tmpPath := path + ".tmp"
 
-	if err := os.MkdirAll(inboxDir, 0o755); err != nil {
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return "", err
 	}
 	if err := os.WriteFile(tmpPath, []byte(content.String()), 0o644); err != nil {

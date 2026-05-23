@@ -48,8 +48,8 @@ func IsPin(e Event) bool {
 	return e.Tag == "pin"
 }
 
-func IsWin(e Event) bool {
-	return e.Tag == "win"
+func IsMeeting(e Event) bool {
+	return e.Tag == "win" || e.Tag == "mtg"
 }
 
 func SnapPin(pinTime time.Time, speechEvents []Event) time.Time {
@@ -228,6 +228,13 @@ var (
 )
 
 func extractMeetingTitle(text string) string {
+	if strings.HasPrefix(text, "joined: ") {
+		title := strings.TrimPrefix(text, "joined: ")
+		if bareMeetingTitles[title] {
+			return ""
+		}
+		return title
+	}
 	if m := meetingArrowRe.FindStringSubmatch(text); m != nil {
 		if bareMeetingTitles[m[1]] {
 			return ""
@@ -246,7 +253,7 @@ func extractMeetingTitle(text string) string {
 func meetingEvents(events []Event) []meetingEvent {
 	var meetings []meetingEvent
 	for _, e := range events {
-		if !IsWin(e) {
+		if !IsMeeting(e) {
 			continue
 		}
 		title := extractMeetingTitle(e.Text)
