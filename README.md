@@ -47,24 +47,24 @@ defaults are used.
 
 See [`config.example.json`](config.example.json) for all available fields.
 
-| Section      | Field                    | Default                               | Description                               |
-| ------------ | ------------------------ | ------------------------------------- | ----------------------------------------- |
-| `whisper`    | `url`                    | `http://localhost:8178/v1/...`        | Whisper server transcription endpoint     |
-| `whisper`    | `timeout_s`              | `60`                                  | HTTP timeout for transcription requests   |
-| `llm`        | `url`                    | `http://localhost:8179/v1/...`        | LLM server chat completions endpoint      |
-| `llm`        | `model`                  | `default`                             | Model name sent in API requests           |
-| `llm`        | `timeout_s`              | `180`                                 | HTTP timeout for LLM requests             |
-| `transcript` | `output_dir`             | `~/.local/share/recorder/transcripts` | Directory for daily transcript files      |
-| `segments`   | `output_dir`             | `~/.local/share/recorder/segments`    | Directory for segment summary files       |
-| `dedup`      | `threshold`              | `0.6`                                 | Token overlap threshold for mic/sys dedup |
-| `signals`    | `silence_threshold_secs` | `180`                                 | Silence duration before segment boundary  |
-| `signals`    | `cdp_ports`              | `[9224, 9223]`                        | Chrome DevTools Protocol ports to poll    |
+| Section      | Field               | Default                               | Description                               |
+| ------------ | ------------------- | ------------------------------------- | ----------------------------------------- |
+| `whisper`    | `url`               | `http://localhost:8178/v1/...`        | Whisper server transcription endpoint     |
+| `whisper`    | `timeoutS`          | `60`                                  | HTTP timeout for transcription requests   |
+| `llm`        | `url`               | `http://localhost:8179/v1/...`        | LLM server chat completions endpoint      |
+| `llm`        | `model`             | `default`                             | Model name sent in API requests           |
+| `llm`        | `timeoutS`          | `180`                                 | HTTP timeout for LLM requests             |
+| `transcript` | `outputDir`         | `~/.local/share/recorder/transcripts` | Directory for daily transcript files      |
+| `segments`   | `outputDir`         | `~/.local/share/recorder/segments`    | Directory for segment summary files       |
+| `dedup`      | `threshold`         | `0.6`                                 | Token overlap threshold for mic/sys dedup |
+| `signals`    | `silenceThresholdS` | `180`                                 | Silence duration before segment boundary  |
+| `signals`    | `cdpPorts`          | `[]`                                  | Chrome DevTools Protocol ports to poll    |
 
 ## Output
 
 ### Daily Transcripts
 
-Streaming, append-only markdown files in `transcript.output_dir`:
+Streaming, append-only markdown files in `transcript.outputDir`:
 
 ```
 <output_dir>/YYYY-MM-DD-recorder.md
@@ -92,7 +92,7 @@ change), `ppl` (participants), `idl` (silence), `nfo` (user note), `pin`
 
 ### Segment Summaries
 
-Atomic markdown files in `segments.output_dir`:
+Atomic markdown files in `segments.outputDir`:
 
 ```
 <output_dir>/YYYY-MM-DD-HHMM-<slug>.md
@@ -127,13 +127,13 @@ recorder segment <transcript> --boundaries  # show boundaries only (no LLM)
 ## Chrome DevTools Protocol
 
 Speaker attribution and meeting detection require Chrome launched with remote
-debugging:
+debugging. Configure the ports in `config.json` under `signals.cdpPorts`:
 
 ```bash
-google-chrome --remote-debugging-port=9224  # for Google Meet
-google-chrome --remote-debugging-port=9223  # for Microsoft Teams
+google-chrome --remote-debugging-port=9222
 ```
 
-The recorder polls these ports, auto-detects meeting tabs, identifies active
-speakers by observing CSS class changes on participant tiles, and detects
-meeting changes when tabs appear/disappear or titles change.
+The recorder polls all configured CDP ports, auto-detects meeting tabs
+(Google Meet, Microsoft Teams), identifies active speakers by observing CSS
+class changes on participant tiles, and detects meeting changes when tabs
+appear/disappear or titles change.

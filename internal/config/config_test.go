@@ -74,11 +74,11 @@ func TestDefaults_HasReasonableValues(t *testing.T) {
 	if cfg.Dedup.Threshold == 0 {
 		t.Error("dedup threshold should have default")
 	}
-	if cfg.Signals.SilenceThresholdSecs == 0 {
+	if cfg.Signals.SilenceThresholdS == 0 {
 		t.Error("silence threshold should have default")
 	}
-	if len(cfg.Signals.CDPPorts) == 0 {
-		t.Error("CDP ports should have default")
+	if cfg.Signals.CDPPorts == nil {
+		t.Error("CDP ports should be initialized (empty slice, not nil)")
 	}
 }
 
