@@ -8,16 +8,16 @@ structured summaries via a local LLM.
 ## Architecture
 
 ```
- parec (mic) ──┐                    ┌─────────────────┐
-               ├─→ RMS gate ──→ WAV │  whisper-server  │──→ LLM cleanup ──┐
- parec (sys) ──┘    (silence        │  (Silero VAD +   │                   │
-                     detection)      │   ASR decode)    │                   │
-                                     └─────────────────┘                   │
-                                                                           ▼
+                                    ┌────────────────┐
+ parec (mic) ──┐                    │ whisper-server │
+               ├─→ RMS gate ─→ WAV ─│ (Silero VAD +  │─→ LLM cleanup ────┐
+ parec (sys) ──┘   (silence         │  ASR decode)   │                   │
+                    detection)      └────────────────┘                   │
+                                                                         ▼
  Chrome CDP ──→ SpeakerTimeline ←── Transcription Worker ──→ DailyTranscript
  (Meet/Teams)   (who spoke when)            │                (append-only)
-            └──→ MeetingState ──────→ IncrementalSegmenter
-                 (tab changes)              │
+           └──→ MeetingState ──────→ IncrementalSegmenter
+                (tab changes)               │
                                             ▼
                                     LLM Summarization ──→ Segment Files
 ```
@@ -123,14 +123,6 @@ recorder segment <transcript>             # show segments (dry-run)
 recorder segment <transcript> --write     # write segment files + transcript markers
 recorder segment <transcript> --boundaries  # show boundaries only (no LLM)
 ```
-
-### Daemon keybindings (raw terminal)
-
-| Key   | Action                                  |
-| ----- | --------------------------------------- |
-| `C-c` | Quit (graceful shutdown, final segment) |
-| `p`   | Pause/resume capture                    |
-| `s`   | Insert segment boundary pin             |
 
 ## Chrome DevTools Protocol
 
