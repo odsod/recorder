@@ -102,15 +102,15 @@ func (r *Recorder) captureLoop(ctx context.Context, chunkCh chan<- AudioChunk) {
 	micCmd, micReader, err := audio.StartParec(ctx, micSource, audio.SampleRate)
 	if err != nil {
 		r.log(fmt.Sprintf("ERROR starting mic parec: %v", err))
-		sysCmd.Process.Kill()
+		_ = sysCmd.Process.Kill()
 		return
 	}
 
 	defer func() {
-		sysCmd.Process.Kill()
-		sysCmd.Wait()
-		micCmd.Process.Kill()
-		micCmd.Wait()
+		_ = sysCmd.Process.Kill()
+		_ = sysCmd.Wait()
+		_ = micCmd.Process.Kill()
+		_ = micCmd.Wait()
 	}()
 
 	var state captureState
@@ -124,15 +124,6 @@ func (r *Recorder) captureLoop(ctx context.Context, chunkCh chan<- AudioChunk) {
 			}
 			return
 		default:
-		}
-
-		if r.paused.Load() {
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(500 * time.Millisecond):
-			}
-			continue
 		}
 
 		if err := r.lk.Heartbeat(); err != nil {
