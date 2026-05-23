@@ -1,0 +1,32 @@
+version: "2"
+
+formatters:
+  enable:
+    - gci
+    - gofumpt
+    - goimports
+    - golines
+  settings:
+    golines:
+      max-len: 120
+
+linters:
+  enable:
+    - gosec
+  settings:
+    gosec:
+      excludes:
+        # Integer conversions are bounded by audio sample sizes and system APIs.
+        - G115
+        # Subprocess args come from trusted config, not user input.
+        - G204
+        # File permissions 0644/0755 are intentional for user-facing files.
+        - G301
+        - G302
+        - G306
+        # File paths come from config, not untrusted input.
+        - G304
+        # HTTP URLs come from config, not untrusted input.
+        - G704
+        # Fprintf to stderr is not XSS.
+        - G705
