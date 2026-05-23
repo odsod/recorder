@@ -50,7 +50,7 @@ func New(ctx context.Context, cfg config.Config) (*Recorder, error) {
 		speakerTimeline: timeline.NewSpeakerTimeline(speakerTimelineMaxAgeSecs),
 		participantSet:  timeline.NewParticipantSet(),
 		meetingState:    timeline.NewMeetingState(),
-		silenceMonitor:  signals.NewSilenceMonitor(cfg.Signals.SilenceThresholdSecs),
+		silenceMonitor:  signals.NewSilenceMonitor(cfg.Signals.SilenceThresholdS),
 		lastPplSet:      make(map[string]struct{}),
 	}
 

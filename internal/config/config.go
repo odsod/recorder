@@ -8,21 +8,21 @@ import (
 
 type WhisperConfig struct {
 	URL      string `json:"url"`
-	TimeoutS int    `json:"timeout_s"`
+	TimeoutS int    `json:"timeoutS"`
 }
 
 type LLMConfig struct {
 	URL      string `json:"url"`
 	Model    string `json:"model"`
-	TimeoutS int    `json:"timeout_s"`
+	TimeoutS int    `json:"timeoutS"`
 }
 
 type TranscriptConfig struct {
-	OutputDir string `json:"output_dir"`
+	OutputDir string `json:"outputDir"`
 }
 
 type SegmentsConfig struct {
-	OutputDir string `json:"output_dir"`
+	OutputDir string `json:"outputDir"`
 }
 
 type DedupConfig struct {
@@ -30,8 +30,8 @@ type DedupConfig struct {
 }
 
 type SignalsConfig struct {
-	SilenceThresholdSecs int   `json:"silence_threshold_secs"`
-	CDPPorts             []int `json:"cdp_ports"`
+	SilenceThresholdS int   `json:"silenceThresholdS"`
+	CDPPorts          []int `json:"cdpPorts"`
 }
 
 type Config struct {
@@ -64,8 +64,8 @@ func defaults() Config {
 			Threshold: 0.6,
 		},
 		Signals: SignalsConfig{
-			SilenceThresholdSecs: 180,
-			CDPPorts:             []int{9224, 9223},
+			SilenceThresholdS: 180,
+			CDPPorts:          []int{},
 		},
 	}
 }

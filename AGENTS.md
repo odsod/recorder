@@ -127,8 +127,7 @@ Every line: `[HH:MM:SS] <emoji> **<tag>** <text>`
 | llm-server     | `http://localhost:8179/v1/chat/completions`     | Cleanup + summarization |
 
 System: `pulseaudio-utils` (parec).
-Chrome (Meet): `--remote-debugging-port=9224`.
-Chrome (Teams): `--remote-debugging-port=9223`.
+Chrome: `--remote-debugging-port=<port>` (configure in `signals.cdpPorts`).
 
 ## Development
 
@@ -142,18 +141,18 @@ Chrome (Teams): `--remote-debugging-port=9223`.
 
 ```json
 {
-  "whisper": { "url": "http://localhost:8178/v1/audio/transcriptions", "timeout_s": 60 },
+  "whisper": { "url": "http://localhost:8178/v1/audio/transcriptions", "timeoutS": 60 },
   "llm": {
     "url": "http://localhost:8179/v1/chat/completions",
     "model": "default",
-    "timeout_s": 180
+    "timeoutS": 180
   },
-  "transcript": { "output_dir": "~/.local/share/recorder/transcripts" },
-  "segments": { "output_dir": "~/.local/share/recorder/segments" },
+  "transcript": { "outputDir": "~/.local/share/recorder/transcripts" },
+  "segments": { "outputDir": "~/.local/share/recorder/segments" },
   "dedup": { "threshold": 0.6 },
   "signals": {
-    "silence_threshold_secs": 180,
-    "cdp_ports": [9224, 9223]
+    "silenceThresholdS": 180,
+    "cdpPorts": [9222]
   }
 }
 ```
@@ -199,7 +198,7 @@ discovers speaking indicator class via temporal diffing of CSS class sets.
 
 - **Speaker detection**: exact — platform's own visual indicator, ~1s polling interval
 - **Meeting detection**: tab URL/title changes trigger `MeetingState.Set()`
-- **Platforms**: Meet (port 9224), Teams (port 9223)
+- **Platforms**: Meet, Teams (auto-detected by URL on any configured port)
 - **Cache invalidation**: WebSocket URL change → reset discovery
 
 ## Lockfile
