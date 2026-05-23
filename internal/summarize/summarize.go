@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -209,13 +210,13 @@ func doLLMCall(ctx context.Context, system, user string, cfg config.LLMConfig) (
 		return nil, err
 	}
 	if len(result.Choices) == 0 {
-		return nil, fmt.Errorf("no choices in response")
+		return nil, errors.New("no choices in response")
 	}
 
 	content := result.Choices[0].Message.Content
 	m := jsonExtractRe.FindString(content)
 	if m == "" {
-		return nil, fmt.Errorf("no JSON in response")
+		return nil, errors.New("no JSON in response")
 	}
 
 	var parsed map[string]any
@@ -235,7 +236,7 @@ func ExtractParticipants(seg segment.Segment) []string {
 		}
 		text := pplRe.ReplaceAllString(e.Text, "")
 		text = strings.TrimSuffix(text, " joined")
-		for _, name := range strings.Split(text, ",") {
+		for name := range strings.SplitSeq(text, ",") {
 			name = strings.TrimSpace(name)
 			if name != "" {
 				names[name] = struct{}{}

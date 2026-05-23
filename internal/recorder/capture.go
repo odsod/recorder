@@ -2,6 +2,7 @@ package recorder
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -91,8 +92,8 @@ func (r *Recorder) captureLoop(ctx context.Context, chunkCh chan<- AudioChunk) {
 		r.log(fmt.Sprintf("ERROR: %v", err))
 		return
 	}
-	r.log(fmt.Sprintf("system: %s", monitor))
-	r.log(fmt.Sprintf("mic: %s", micSource))
+	r.log("system: " + monitor)
+	r.log("mic: " + micSource)
 
 	sysCmd, sysReader, err := audio.StartParec(ctx, monitor, audio.SampleRate)
 	if err != nil {
@@ -132,7 +133,7 @@ func (r *Recorder) captureLoop(ctx context.Context, chunkCh chan<- AudioChunk) {
 
 		sysData, err := audio.ReadFrame(sysReader)
 		if err != nil {
-			if err != io.EOF {
+			if !errors.Is(err, io.EOF) {
 				r.log(fmt.Sprintf("sys read error: %v", err))
 			}
 			r.log("system audio ended")

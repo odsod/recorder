@@ -71,9 +71,9 @@ func New(ctx context.Context, cfg config.Config) (*Recorder, error) {
 
 func (r *Recorder) Run(ctx context.Context) error {
 	r.log(transcript.FormatMessage("🟢 rec", "started", nil))
-	r.log(fmt.Sprintf("transcript: %s", r.transcript.Path()))
-	r.log(fmt.Sprintf("whisper: %s", r.cfg.Whisper.URL))
-	r.log(fmt.Sprintf("llm: %s", r.cfg.LLM.URL))
+	r.log("transcript: " + r.transcript.Path())
+	r.log("whisper: " + r.cfg.Whisper.URL)
+	r.log("llm: " + r.cfg.LLM.URL)
 
 	ts := time.Now().Format("15:04:05")
 	r.transcript.Append(ts, "🟢 rec", "started", nil)
@@ -82,15 +82,11 @@ func (r *Recorder) Run(ctx context.Context) error {
 
 	var wg sync.WaitGroup
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		r.transcriptionWorker(ctx, chunkCh)
-	}()
+	})
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		signals.RunSpeakerCollector(
 			ctx,
 			r.speakerTimeline,
@@ -99,7 +95,7 @@ func (r *Recorder) Run(ctx context.Context) error {
 			r.cfg.Signals.CDPPorts,
 			r.log,
 		)
-	}()
+	})
 
 	r.log("signals started")
 

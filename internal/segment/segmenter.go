@@ -84,7 +84,7 @@ func (s *IncrementalSegmenter) OnMeetingChange(newTitle string, t time.Time) {
 	if !s.lastSpeech.IsZero() && len(s.events) > 0 && s.pending == nil {
 		s.pending = &Boundary{
 			Time:   t,
-			Reason: fmt.Sprintf("meeting change → %s", newTitle),
+			Reason: "meeting change → " + newTitle,
 		}
 		s.log(fmt.Sprintf("segmenter: boundary detected (meeting change → %s)", newTitle))
 	}
@@ -168,7 +168,7 @@ func (s *IncrementalSegmenter) summarizeAndWrite(seg Segment) {
 
 	if skip || summary == "" {
 		s.appendSeg(time.Now().Format("15:04:05"), fmt.Sprintf("| %s skip", seg.ID))
-		s.log(fmt.Sprintf("segmenter: skipped segment %s", seg.ID))
+		s.log("segmenter: skipped segment " + seg.ID)
 		return
 	}
 
@@ -180,7 +180,7 @@ func (s *IncrementalSegmenter) summarizeAndWrite(seg Segment) {
 
 	slug := Slugify(title)
 	s.appendSeg(time.Now().Format("15:04:05"), fmt.Sprintf("| %s %s", seg.ID, slug))
-	s.log(fmt.Sprintf("segmenter: wrote %s", filename))
+	s.log("segmenter: wrote " + filename)
 }
 
 func filterAfter(events []Event, t time.Time) []Event {

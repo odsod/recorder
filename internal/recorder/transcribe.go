@@ -36,7 +36,8 @@ func (r *Recorder) transcribeChunk(ctx context.Context, chunk AudioChunk) {
 
 	speakers := r.speakerTimeline.SpeakersIn(chunk.StartTime, chunk.EndTime)
 
-	if sysText != "" {
+	switch {
+	case sysText != "":
 		cleaned, err := transcribe.CleanupText(ctx, sysText, r.cfg.LLM)
 		if err != nil {
 			r.log(fmt.Sprintf("cleanup sys: %v", err))
@@ -65,9 +66,9 @@ func (r *Recorder) transcribeChunk(ctx context.Context, chunk AudioChunk) {
 				}
 			}
 		}
-	} else if micText != "" {
+	case micText != "":
 		if r.lastSystemText != "" && transcribe.TextsOverlap(r.lastSystemText, micText, r.cfg.Dedup.Threshold) {
-			r.log(fmt.Sprintf("mic: (dedup) %s", truncate(micText, 60)))
+			r.log("mic: (dedup) " + truncate(micText, 60))
 		} else {
 			cleaned, err := transcribe.CleanupText(ctx, micText, r.cfg.LLM)
 			if err != nil {
@@ -82,7 +83,7 @@ func (r *Recorder) transcribeChunk(ctx context.Context, chunk AudioChunk) {
 				r.segmenter.OnSpeech(chunk.StartTime, "mic", cleaned)
 			}
 		}
-	} else {
+	default:
 		r.log("(no speech detected)")
 	}
 	r.log("listening")
@@ -94,7 +95,7 @@ func (r *Recorder) flushSignalEvents(start, end time.Time) {
 	if title, changedAt, ok := r.meetingState.Consume(); ok {
 		ts := changedAt.Format("15:04:05")
 		if title != "" {
-			msg := fmt.Sprintf("joined: %s", title)
+			msg := "joined: " + title
 			r.transcript.Append(ts, "\U0001fa9f mtg", msg, nil)
 			r.log(transcript.FormatMessage("\U0001fa9f mtg", msg, nil))
 			r.segmenter.OnSignal(changedAt, "mtg", "\U0001fa9f", msg)

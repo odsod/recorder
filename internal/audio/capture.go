@@ -29,7 +29,7 @@ func GetMicSource(ctx context.Context) (string, error) {
 
 func StartParec(ctx context.Context, device string, sampleRate int) (*exec.Cmd, io.Reader, error) {
 	cmd := exec.CommandContext(ctx, "parec",
-		fmt.Sprintf("--device=%s", device),
+		"--device="+device,
 		fmt.Sprintf("--rate=%d", sampleRate),
 		"--channels=1",
 		"--format=s16le",

@@ -121,7 +121,7 @@ func wsDial(ctx context.Context, rawURL string) (net.Conn, error) {
 
 	host := u.Host
 	if u.Port() == "" {
-		host = host + ":80"
+		host += ":80"
 	}
 
 	var d net.Dialer
