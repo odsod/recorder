@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/odsod/recorder/internal/transcript"
 )
 
 const summarizeTimeout = 3 * time.Minute
@@ -31,9 +33,9 @@ type IncrementalSegmenter struct {
 	ctx          context.Context
 	handler      SegmentHandler
 	log          func(string)
-	appendSeg    func(timestamp, text string)
-	events       []Event
-	speechEvents []Event
+	appendSeg    func(transcript.Event)
+	events       []transcript.Event
+	speechEvents []transcript.Event
 	lastSpeech   time.Time
 	pending      *Boundary
 	wg           sync.WaitGroup
@@ -43,7 +45,7 @@ func NewSegmenter(
 	ctx context.Context,
 	handler SegmentHandler,
 	log func(string),
-	appendSeg func(timestamp, text string),
+	appendSeg func(transcript.Event),
 ) *IncrementalSegmenter {
 	return &IncrementalSegmenter{
 		ctx:       ctx,
@@ -53,19 +55,18 @@ func NewSegmenter(
 	}
 }
 
-func (s *IncrementalSegmenter) OnSpeech(t time.Time, tag, text string) {
-	event := Event{Time: t, Tag: tag, Text: text}
-	s.events = append(s.events, event)
-	s.speechEvents = append(s.speechEvents, event)
+func (s *IncrementalSegmenter) OnSpeech(e transcript.Event) {
+	s.events = append(s.events, e)
+	s.speechEvents = append(s.speechEvents, e)
 
 	if s.pending != nil && !s.lastSpeech.IsZero() {
 		s.finalize()
 	}
-	s.lastSpeech = t
+	s.lastSpeech = e.Time
 }
 
-func (s *IncrementalSegmenter) OnSignal(t time.Time, tag, emoji, text string) {
-	s.events = append(s.events, Event{Time: t, Tag: tag, Emoji: emoji, Text: text})
+func (s *IncrementalSegmenter) OnEvent(e transcript.Event) {
+	s.events = append(s.events, e)
 }
 
 func (s *IncrementalSegmenter) OnSilence(durationSecs int) {
@@ -117,16 +118,16 @@ func (s *IncrementalSegmenter) finalize() {
 
 	boundaryTime := s.pending.Time
 
-	var segEvents []Event
+	var segEvents []transcript.Event
 	for _, e := range s.events {
 		if !e.Time.After(boundaryTime) {
 			segEvents = append(segEvents, e)
 		}
 	}
 
-	var segSpeech []Event
+	var segSpeech []transcript.Event
 	for _, e := range segEvents {
-		if IsSpeech(e) {
+		if e.IsSpeech() {
 			segSpeech = append(segSpeech, e)
 		}
 	}
@@ -167,7 +168,11 @@ func (s *IncrementalSegmenter) summarizeAndWrite(seg Segment) {
 	}
 
 	if skip || summary == "" {
-		s.appendSeg(time.Now().Format("15:04:05"), fmt.Sprintf("| %s skip", seg.ID))
+		s.appendSeg(transcript.Event{
+			Time: time.Now(),
+			Type: transcript.Segment,
+			Text: fmt.Sprintf("| %s skip", seg.ID),
+		})
 		s.log("segmenter: skipped segment " + seg.ID)
 		return
 	}
@@ -179,12 +184,16 @@ func (s *IncrementalSegmenter) summarizeAndWrite(seg Segment) {
 	}
 
 	slug := Slugify(title)
-	s.appendSeg(time.Now().Format("15:04:05"), fmt.Sprintf("| %s %s", seg.ID, slug))
+	s.appendSeg(transcript.Event{
+		Time: time.Now(),
+		Type: transcript.Segment,
+		Text: fmt.Sprintf("| %s %s", seg.ID, slug),
+	})
 	s.log("segmenter: wrote " + filename)
 }
 
-func filterAfter(events []Event, t time.Time) []Event {
-	var result []Event
+func filterAfter(events []transcript.Event, t time.Time) []transcript.Event {
+	var result []transcript.Event
 	for _, e := range events {
 		if e.Time.After(t) {
 			result = append(result, e)

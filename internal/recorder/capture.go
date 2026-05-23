@@ -172,9 +172,12 @@ func (r *Recorder) captureLoop(ctx context.Context, chunkCh chan<- AudioChunk) {
 			state.recordSilence()
 			if r.silenceMonitor.Tick(state.consecutiveSilentSecs) {
 				mins := state.consecutiveSilentSecs / 60
-				ts := time.Now().Format("15:04:05")
-				r.transcript.Append(ts, "💤 idl", fmt.Sprintf("%d min", mins), nil)
-				r.log(transcript.FormatMessage("💤 idl", fmt.Sprintf("%d min", mins), nil))
+				e := transcript.Event{
+					Time: time.Now(),
+					Type: transcript.Idle,
+					Text: fmt.Sprintf("%d min", mins),
+				}
+				r.appendEvent(e)
 			}
 			r.segmenter.OnSilence(state.consecutiveSilentSecs)
 		}

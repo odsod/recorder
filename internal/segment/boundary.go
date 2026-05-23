@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/odsod/recorder/internal/transcript"
 )
 
 const (
@@ -22,13 +24,6 @@ var bareMeetingTitles = map[string]bool{
 	"meet.google.com_/": true,
 }
 
-type Event struct {
-	Time  time.Time
-	Tag   string
-	Emoji string
-	Text  string
-}
-
 type Boundary struct {
 	Time   time.Time
 	Reason string
@@ -37,24 +32,12 @@ type Boundary struct {
 type Segment struct {
 	Start  time.Time
 	End    time.Time
-	Events []Event
+	Events []transcript.Event
 	ID     string
 }
 
-func IsSpeech(e Event) bool {
-	return e.Tag == "sys" || e.Tag == "mic"
-}
-
-func IsPin(e Event) bool {
-	return e.Tag == "pin"
-}
-
-func IsMeeting(e Event) bool {
-	return e.Tag == "win" || e.Tag == "mtg"
-}
-
-func SnapPin(pinTime time.Time, speechEvents []Event) time.Time {
-	var before []Event
+func SnapPin(pinTime time.Time, speechEvents []transcript.Event) time.Time {
+	var before []transcript.Event
 	for _, e := range speechEvents {
 		if !e.Time.After(pinTime) {
 			before = append(before, e)
@@ -79,12 +62,12 @@ func SnapPin(pinTime time.Time, speechEvents []Event) time.Time {
 	return pinTime
 }
 
-func DetectBoundaries(events []Event, now time.Time) []Boundary {
+func DetectBoundaries(events []transcript.Event, now time.Time) []Boundary {
 	var boundaries []Boundary
 
-	var speech []Event
+	var speech []transcript.Event
 	for _, e := range events {
-		if IsSpeech(e) {
+		if e.IsSpeech() {
 			speech = append(speech, e)
 		}
 	}
@@ -126,7 +109,7 @@ func DetectBoundaries(events []Event, now time.Time) []Boundary {
 
 	// 3. Pins
 	for _, e := range events {
-		if IsPin(e) {
+		if e.IsPin() {
 			snapped := SnapPin(e.Time, speech)
 			boundaries = append(boundaries, Boundary{Time: snapped, Reason: "pin"})
 		}
@@ -151,14 +134,14 @@ func Dedupe(boundaries []Boundary) []Boundary {
 	return result
 }
 
-func SplitAtBoundaries(events []Event, boundaries []Boundary) []Segment {
+func SplitAtBoundaries(events []transcript.Event, boundaries []Boundary) []Segment {
 	if len(events) == 0 {
 		return nil
 	}
 
-	var speech []Event
+	var speech []transcript.Event
 	for _, e := range events {
-		if IsSpeech(e) {
+		if e.IsSpeech() {
 			speech = append(speech, e)
 		}
 	}
@@ -192,14 +175,14 @@ func SplitAtBoundaries(events []Event, boundaries []Boundary) []Segment {
 			end = speech[len(speech)-1].Time
 		}
 
-		var segEvents []Event
+		var segEvents []transcript.Event
 		for _, e := range events {
 			if !e.Time.Before(start) && !e.Time.After(end) {
 				segEvents = append(segEvents, e)
 			}
 		}
 
-		hasSpeech := slices.ContainsFunc(segEvents, IsSpeech)
+		hasSpeech := slices.ContainsFunc(segEvents, transcript.Event.IsSpeech)
 		if hasSpeech {
 			segments = append(segments, Segment{
 				Start:  start,
@@ -217,43 +200,14 @@ type meetingEvent struct {
 	title string
 }
 
-var (
-	meetingTitleRe = regexp.MustCompile(`"([^"]+)"(?:\s+(?:opened|active))?$`)
-	meetingArrowRe = regexp.MustCompile(`→\s*"([^"]+)"`)
-)
-
-func extractMeetingTitle(text string) string {
-	if after, ok := strings.CutPrefix(text, "joined: "); ok {
-		title := after
-		if bareMeetingTitles[title] {
-			return ""
-		}
-		return title
-	}
-	if m := meetingArrowRe.FindStringSubmatch(text); m != nil {
-		if bareMeetingTitles[m[1]] {
-			return ""
-		}
-		return m[1]
-	}
-	if m := meetingTitleRe.FindStringSubmatch(text); m != nil {
-		if bareMeetingTitles[m[1]] {
-			return ""
-		}
-		return m[1]
-	}
-	return ""
-}
-
-func meetingEvents(events []Event) []meetingEvent {
+func meetingEvents(events []transcript.Event) []meetingEvent {
 	var meetings []meetingEvent
 	for _, e := range events {
-		if !IsMeeting(e) {
+		if !e.IsMeeting() {
 			continue
 		}
-		title := extractMeetingTitle(e.Text)
-		if title != "" {
-			meetings = append(meetings, meetingEvent{time: e.Time, title: title})
+		if e.Title != "" && !bareMeetingTitles[e.Title] {
+			meetings = append(meetings, meetingEvent{time: e.Time, title: e.Title})
 		}
 	}
 	return meetings
@@ -278,7 +232,7 @@ func Slugify(title string) string {
 func FormatTranscript(seg Segment) string {
 	var lines []string
 	for _, e := range seg.Events {
-		if !IsSpeech(e) {
+		if !e.IsSpeech() {
 			continue
 		}
 		if isHallucination(e.Text) {
@@ -290,13 +244,11 @@ func FormatTranscript(seg Segment) string {
 	return strings.Join(lines, "\n")
 }
 
-func extractSpeakerAndText(e Event) (string, string) {
-	if strings.HasPrefix(e.Text, "[") {
-		if idx := strings.Index(e.Text, "]"); idx != -1 {
-			return strings.TrimSpace(e.Text[1:idx]), strings.TrimSpace(e.Text[idx+1:])
-		}
+func extractSpeakerAndText(e transcript.Event) (string, string) {
+	if e.Speaker != "" {
+		return e.Speaker, e.Text
 	}
-	return e.Tag, e.Text
+	return e.Source, e.Text
 }
 
 func isHallucination(text string) bool {

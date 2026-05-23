@@ -22,7 +22,7 @@ const (
 
 type Recorder struct {
 	cfg             config.Config
-	transcript      *transcript.DailyTranscript
+	transcript      *TranscriptWriter
 	lk              *lock.RecorderLock
 	speakerTimeline *timeline.SpeakerTimeline
 	participantSet  *timeline.ParticipantSet
@@ -36,7 +36,7 @@ type Recorder struct {
 }
 
 func New(ctx context.Context, cfg config.Config) (*Recorder, error) {
-	t := transcript.New(cfg.Transcript.OutputDir)
+	t := NewTranscriptWriter(cfg.Transcript.OutputDir)
 	lk := lock.New(cfg.Transcript.OutputDir)
 
 	if err := lk.Acquire(); err != nil {
@@ -62,21 +62,19 @@ func New(ctx context.Context, cfg config.Config) (*Recorder, error) {
 			return summarize.WriteSegmentFile(title, summary, seg, date, cfg.Segments.OutputDir)
 		},
 	}
-	r.segmenter = segment.NewSegmenter(ctx, handler, r.log, func(timestamp, text string) {
-		t.Append(timestamp, "✂️ seg", text, nil)
+	r.segmenter = segment.NewSegmenter(ctx, handler, r.log, func(e transcript.Event) {
+		t.AppendEvent(e)
 	})
 
 	return r, nil
 }
 
 func (r *Recorder) Run(ctx context.Context) error {
-	r.log(transcript.FormatMessage("🟢 rec", "started", nil))
 	r.log("transcript: " + r.transcript.Path())
 	r.log("whisper: " + r.cfg.Whisper.URL)
 	r.log("llm: " + r.cfg.LLM.URL)
 
-	ts := time.Now().Format("15:04:05")
-	r.transcript.Append(ts, "🟢 rec", "started", nil)
+	r.appendEvent(transcript.Event{Time: time.Now(), Type: transcript.Recorder, Text: "started"})
 
 	chunkCh := make(chan AudioChunk, audioChunkBufferSize)
 
@@ -104,13 +102,11 @@ func (r *Recorder) Run(ctx context.Context) error {
 
 	wg.Wait()
 
-	ts = time.Now().Format("15:04:05")
-	r.transcript.Append(ts, "🔴 rec", "stopped", nil)
+	r.appendEvent(transcript.Event{Time: time.Now(), Type: transcript.Recorder, Text: "stopped"})
 	r.log("running final segmentation...")
 	r.segmenter.Flush(ctx)
 	r.log("shutdown complete")
 	r.lk.Release()
-	r.log(transcript.FormatMessage("🔴 rec", "stopped", nil))
 	return nil
 }
 

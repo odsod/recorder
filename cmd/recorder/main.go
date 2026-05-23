@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -66,7 +67,7 @@ func runSegment() error {
 		os.Exit(1)
 	}
 
-	path := os.Args[2]
+	path := filepath.Clean(os.Args[2])
 	boundariesOnly := false
 	write := false
 	for _, arg := range os.Args[3:] {
@@ -78,12 +79,16 @@ func runSegment() error {
 		}
 	}
 
-	events, err := transcript.ParseTranscript(path)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	t, err := transcript.Parse(data)
 	if err != nil {
 		return err
 	}
 
-	boundaries := segment.DetectBoundaries(events, time.Now())
+	boundaries := segment.DetectBoundaries(t.Events, time.Now())
 
 	if boundariesOnly {
 		for _, b := range boundaries {
@@ -92,11 +97,11 @@ func runSegment() error {
 		return nil
 	}
 
-	segments := segment.SplitAtBoundaries(events, boundaries)
+	segments := segment.SplitAtBoundaries(t.Events, boundaries)
 	for _, seg := range segments {
 		speechCount := 0
 		for _, e := range seg.Events {
-			if segment.IsSpeech(e) {
+			if e.IsSpeech() {
 				speechCount++
 			}
 		}

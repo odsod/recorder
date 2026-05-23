@@ -2,54 +2,98 @@ package transcript
 
 import (
 	"bufio"
-	"os"
 	"regexp"
 	"strings"
 	"time"
-
-	"github.com/odsod/recorder/internal/segment"
 )
+
+type Transcript struct {
+	Events []Event
+}
 
 var lineRe = regexp.MustCompile(`^\[(\d{2}:\d{2}:\d{2})\] (.+?) \*\*(\w+)\*\*(.*)$`)
 
-func ParseTranscript(path string) ([]segment.Event, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = f.Close() }()
-
-	var events []segment.Event
-	scanner := bufio.NewScanner(f)
+func Parse(data []byte) (Transcript, error) {
+	var events []Event
+	scanner := bufio.NewScanner(strings.NewReader(string(data)))
 	for scanner.Scan() {
-		line := scanner.Text()
-		m := lineRe.FindStringSubmatch(line)
-		if m == nil {
-			continue
+		if e, ok := parseLine(scanner.Text()); ok {
+			events = append(events, e)
 		}
+	}
+	if err := scanner.Err(); err != nil {
+		return Transcript{}, err
+	}
+	return Transcript{Events: events}, nil
+}
 
-		ts, err := time.Parse("15:04:05", m[1])
-		if err != nil {
-			continue
-		}
+func parseLine(line string) (Event, bool) {
+	m := lineRe.FindStringSubmatch(line)
+	if m == nil {
+		return Event{}, false
+	}
 
-		emoji := m[2]
-		tag := m[3]
-		text := strings.TrimSpace(m[4])
-		// Strip speaker attribution brackets
+	ts, err := time.Parse("15:04:05", m[1])
+	if err != nil {
+		return Event{}, false
+	}
+
+	tag := m[3]
+	text := strings.TrimSpace(m[4])
+
+	e := Event{Time: ts, Text: text}
+	switch tag {
+	case "sys", "mic":
+		e.Type = Speech
+		e.Source = tag
 		if strings.HasPrefix(text, "[") {
 			if idx := strings.Index(text, "]"); idx != -1 {
-				text = strings.TrimSpace(text[idx+1:])
+				e.Speaker = strings.TrimSpace(text[1:idx])
+				e.Text = strings.TrimSpace(text[idx+1:])
 			}
 		}
-
-		events = append(events, segment.Event{
-			Time:  ts,
-			Tag:   tag,
-			Emoji: emoji,
-			Text:  text,
-		})
+	case "mtg", "win":
+		e.Type = Meeting
+		e.Title = parseMeetingTitle(text)
+		e.Text = ""
+	case "ppl":
+		e.Type = Participants
+		e.People = parseParticipants(text)
+		e.Text = ""
+	case "pin":
+		e.Type = Pin
+	case "idl":
+		e.Type = Idle
+	case "rec":
+		e.Type = Recorder
+	case "seg":
+		e.Type = Segment
+	case "nfo":
+		e.Type = Note
+	default:
+		return Event{}, false
 	}
 
-	return events, scanner.Err()
+	return e, true
+}
+
+func parseMeetingTitle(text string) string {
+	if after, ok := strings.CutPrefix(text, "joined: "); ok {
+		return after
+	}
+	if text == "ended" {
+		return ""
+	}
+	return text
+}
+
+func parseParticipants(text string) []string {
+	var people []string
+	for name := range strings.SplitSeq(text, ",") {
+		name = strings.TrimSpace(name)
+		if name != "" {
+			people = append(people, name)
+		}
+	}
+	return people
 }

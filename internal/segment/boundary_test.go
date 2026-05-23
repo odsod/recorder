@@ -3,6 +3,8 @@ package segment
 import (
 	"testing"
 	"time"
+
+	"github.com/odsod/recorder/internal/transcript"
 )
 
 func t(s string) time.Time {
@@ -10,13 +12,16 @@ func t(s string) time.Time {
 	return ts
 }
 
+func speech(ts string, text string) transcript.Event {
+	return transcript.Event{Time: t(ts), Type: transcript.Speech, Source: "sys", Text: text}
+}
+
 func TestDetectBoundaries_SilenceGap(tt *testing.T) {
-	events := []Event{
-		{Time: t("09:00:00"), Tag: "sys", Text: "hello"},
-		{Time: t("09:01:00"), Tag: "sys", Text: "world"},
-		{Time: t("09:10:00"), Tag: "sys", Text: "after gap"},
+	events := []transcript.Event{
+		speech("09:00:00", "hello"),
+		speech("09:01:00", "world"),
+		speech("09:10:00", "after gap"),
 	}
-	// "now" is close to last speech so no trailing silence boundary
 	boundaries := DetectBoundaries(events, t("09:11:00"))
 	if len(boundaries) != 1 {
 		tt.Fatalf("expected 1 boundary, got %d", len(boundaries))
@@ -27,10 +32,10 @@ func TestDetectBoundaries_SilenceGap(tt *testing.T) {
 }
 
 func TestDetectBoundaries_NoGap(tt *testing.T) {
-	events := []Event{
-		{Time: t("09:00:00"), Tag: "sys", Text: "hello"},
-		{Time: t("09:01:00"), Tag: "sys", Text: "world"},
-		{Time: t("09:02:00"), Tag: "sys", Text: "foo"},
+	events := []transcript.Event{
+		speech("09:00:00", "hello"),
+		speech("09:01:00", "world"),
+		speech("09:02:00", "foo"),
 	}
 	boundaries := DetectBoundaries(events, t("09:03:00"))
 	if len(boundaries) != 0 {
@@ -39,8 +44,8 @@ func TestDetectBoundaries_NoGap(tt *testing.T) {
 }
 
 func TestDetectBoundaries_TrailingSilence(tt *testing.T) {
-	events := []Event{
-		{Time: t("09:00:00"), Tag: "sys", Text: "hello"},
+	events := []transcript.Event{
+		speech("09:00:00", "hello"),
 	}
 	now := t("09:00:00").Add(6 * time.Minute)
 	boundaries := DetectBoundaries(events, now)
@@ -50,10 +55,10 @@ func TestDetectBoundaries_TrailingSilence(tt *testing.T) {
 }
 
 func TestDetectBoundaries_Pin(tt *testing.T) {
-	events := []Event{
-		{Time: t("09:00:00"), Tag: "sys", Text: "hello"},
-		{Time: t("09:01:00"), Tag: "sys", Text: "world"},
-		{Time: t("09:01:30"), Tag: "pin", Text: ""},
+	events := []transcript.Event{
+		speech("09:00:00", "hello"),
+		speech("09:01:00", "world"),
+		{Time: t("09:01:30"), Type: transcript.Pin},
 	}
 	boundaries := DetectBoundaries(events, t("09:02:00"))
 	if len(boundaries) != 1 {
@@ -65,39 +70,38 @@ func TestDetectBoundaries_Pin(tt *testing.T) {
 }
 
 func TestSnapPin_SnapsToGap(tt *testing.T) {
-	speech := []Event{
-		{Time: t("09:00:00"), Tag: "sys"},
-		{Time: t("09:00:05"), Tag: "sys"},
-		{Time: t("09:00:30"), Tag: "sys"},
+	events := []transcript.Event{
+		speech("09:00:00", ""),
+		speech("09:00:05", ""),
+		speech("09:00:30", ""),
 	}
 	pinTime := t("09:00:35")
-	snapped := SnapPin(pinTime, speech)
-	// Should snap to 09:00:05 (gap of 25s between 09:00:05 and 09:00:30)
+	snapped := SnapPin(pinTime, events)
 	if snapped != t("09:00:05") {
 		tt.Errorf("snapped to %v, want 09:00:05", snapped)
 	}
 }
 
 func TestSnapPin_NoGap(tt *testing.T) {
-	speech := []Event{
-		{Time: t("09:00:00"), Tag: "sys"},
-		{Time: t("09:00:01"), Tag: "sys"},
-		{Time: t("09:00:02"), Tag: "sys"},
+	events := []transcript.Event{
+		speech("09:00:00", ""),
+		speech("09:00:01", ""),
+		speech("09:00:02", ""),
 	}
 	pinTime := t("09:00:05")
-	snapped := SnapPin(pinTime, speech)
+	snapped := SnapPin(pinTime, events)
 	if snapped != pinTime {
 		tt.Errorf("snapped to %v, want pin time %v (no qualifying gap)", snapped, pinTime)
 	}
 }
 
 func TestSnapPin_OutsideLookback(tt *testing.T) {
-	speech := []Event{
-		{Time: t("09:00:00"), Tag: "sys"},
-		{Time: t("09:00:30"), Tag: "sys"},
+	events := []transcript.Event{
+		speech("09:00:00", ""),
+		speech("09:00:30", ""),
 	}
 	pinTime := t("09:02:30")
-	snapped := SnapPin(pinTime, speech)
+	snapped := SnapPin(pinTime, events)
 	if snapped != pinTime {
 		tt.Errorf("snapped to %v, want pin time (gap outside lookback)", snapped)
 	}
@@ -129,11 +133,11 @@ func TestDedupe_Empty(tt *testing.T) {
 }
 
 func TestSplitAtBoundaries_Basic(tt *testing.T) {
-	events := []Event{
-		{Time: t("09:00:00"), Tag: "sys", Text: "hello"},
-		{Time: t("09:01:00"), Tag: "sys", Text: "world"},
-		{Time: t("09:10:00"), Tag: "sys", Text: "after"},
-		{Time: t("09:11:00"), Tag: "sys", Text: "gap"},
+	events := []transcript.Event{
+		speech("09:00:00", "hello"),
+		speech("09:01:00", "world"),
+		speech("09:10:00", "after"),
+		speech("09:11:00", "gap"),
 	}
 	boundaries := []Boundary{
 		{Time: t("09:01:00"), Reason: "silence"},
@@ -197,13 +201,25 @@ func TestIsHallucination(tt *testing.T) {
 
 func TestExtractSpeakerAndText(tt *testing.T) {
 	tests := []struct {
-		event       Event
+		event       transcript.Event
 		wantSpeaker string
 		wantText    string
 	}{
-		{Event{Tag: "sys", Text: "[Alice] Hello world"}, "Alice", "Hello world"},
-		{Event{Tag: "mic", Text: "No speaker prefix"}, "mic", "No speaker prefix"},
-		{Event{Tag: "sys", Text: "[Bob Smith] Some text"}, "Bob Smith", "Some text"},
+		{
+			transcript.Event{Type: transcript.Speech, Source: "sys", Speaker: "Alice", Text: "Hello world"},
+			"Alice",
+			"Hello world",
+		},
+		{
+			transcript.Event{Type: transcript.Speech, Source: "mic", Text: "No speaker prefix"},
+			"mic",
+			"No speaker prefix",
+		},
+		{
+			transcript.Event{Type: transcript.Speech, Source: "sys", Speaker: "Bob Smith", Text: "Some text"},
+			"Bob Smith",
+			"Some text",
+		},
 	}
 	for _, tc := range tests {
 		speaker, text := extractSpeakerAndText(tc.event)
