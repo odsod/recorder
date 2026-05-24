@@ -13,13 +13,9 @@ import (
 )
 
 // Run appends a user note to today's transcript.
-func Run(args []string) error {
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-
+func Run(cfg config.Config, args []string) error {
 	var text string
+	var err error
 	if len(args) > 0 {
 		text = strings.Join(args, " ")
 	} else {

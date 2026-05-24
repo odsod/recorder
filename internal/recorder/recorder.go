@@ -36,15 +36,15 @@ type Recorder struct {
 	lastPplSet      map[string]struct{}
 }
 
-// New creates a Recorder with the given config, lock, and services.
-func New(ctx context.Context, cfg config.Config, lk *lock.RecorderLock, svc Services) (*Recorder, error) {
+// New creates a Recorder with the given config and services.
+func New(ctx context.Context, cfg config.Config, svc Services) (*Recorder, error) {
 	t := NewTranscriptWriter(cfg.Transcript.OutputDir)
 
 	r := &Recorder{
 		cfg:             cfg,
 		svc:             svc,
 		transcript:      t,
-		lk:              lk,
+		lk:              lock.New(cfg.Transcript.OutputDir),
 		speakerTimeline: timeline.NewSpeakerTimeline(speakerTimelineMaxAgeSecs),
 		participantSet:  timeline.NewParticipantSet(),
 		meetingState:    timeline.NewMeetingState(),
@@ -61,6 +61,11 @@ func New(ctx context.Context, cfg config.Config, lk *lock.RecorderLock, svc Serv
 
 // Run starts capture, transcription, and speaker detection until ctx is cancelled.
 func (r *Recorder) Run(ctx context.Context) error {
+	if err := r.lk.Acquire(); err != nil {
+		return err
+	}
+	defer r.lk.Release()
+
 	slog.InfoContext(ctx, "transcript configured",
 		"path", r.transcript.Path(),
 	)
