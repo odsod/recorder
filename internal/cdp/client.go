@@ -13,44 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"time"
-
-	"github.com/odsod/recorder/internal/httpclient"
 )
-
-type Tab struct {
-	Title                string `json:"title"`
-	URL                  string `json:"url"`
-	Type                 string `json:"type"`
-	WebSocketDebuggerURL string `json:"webSocketDebuggerUrl"`
-}
-
-func listTabs(ctx context.Context, port int) ([]Tab, error) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	u := fmt.Sprintf("http://localhost:%d/json", port)
-	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	resp, err := httpclient.Shared.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	var tabs []Tab
-	if err := json.Unmarshal(body, &tabs); err != nil {
-		return nil, err
-	}
-	return tabs, nil
-}
 
 type cdpRequest struct {
 	ID     int       `json:"id"`

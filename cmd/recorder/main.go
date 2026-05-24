@@ -7,13 +7,10 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
-	"time"
 
+	"github.com/odsod/recorder/internal/app"
 	"github.com/odsod/recorder/internal/config"
 	"github.com/odsod/recorder/internal/note"
-	"github.com/odsod/recorder/internal/recorder"
-	"github.com/odsod/recorder/internal/segment"
-	"github.com/odsod/recorder/internal/summarize"
 	"github.com/odsod/recorder/internal/transcript"
 )
 
@@ -54,11 +51,10 @@ func runRecorder() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	rec, err := recorder.New(ctx, cfg)
-	if err != nil {
-		return err
-	}
-	return rec.Run(ctx)
+	a := app.New(cfg)
+	defer a.Close()
+
+	return a.Run(ctx)
 }
 
 func runSegment() error {
@@ -88,52 +84,21 @@ func runSegment() error {
 		return err
 	}
 
-	boundaries := segment.DetectBoundaries(t.Events, time.Now())
-
 	if boundariesOnly {
-		for _, b := range boundaries {
-			fmt.Printf("[%s] %s\n", b.Time.Format("15:04:05"), b.Reason)
-		}
+		app.PrintBoundaries(t.Events)
 		return nil
 	}
 
-	segments := segment.SplitAtBoundaries(t.Events, boundaries)
-	for _, seg := range segments {
-		speechCount := 0
-		for _, e := range seg.Events {
-			if e.IsSpeech() {
-				speechCount++
-			}
-		}
-		fmt.Printf("segment %s: %s–%s (%d speech events)\n",
-			seg.ID, seg.Start.Format("15:04"), seg.End.Format("15:04"), speechCount)
+	cfg, err := config.Load()
+	if err != nil {
+		return err
 	}
 
-	if write {
-		cfg, err := config.Load()
-		if err != nil {
-			return err
-		}
-		date := time.Now().Format("2006-01-02")
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
-		for _, seg := range segments {
-			ctx := context.Background()
-			title, summary, skip, err := summarize.SummarizeSegment(ctx, seg, cfg.LLM, date)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "summarize error for %s: %v\n", seg.ID, err)
-				continue
-			}
-			if skip {
-				fmt.Printf("  %s: skipped\n", seg.ID)
-				continue
-			}
-			filename, err := summarize.WriteSegmentFile(title, summary, seg, date, cfg.Segments.OutputDir)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "write error for %s: %v\n", seg.ID, err)
-				continue
-			}
-			fmt.Printf("  %s: wrote %s\n", seg.ID, filename)
-		}
-	}
-	return nil
+	a := app.New(cfg)
+	defer a.Close()
+
+	return a.RunSegment(ctx, t.Events, write)
 }

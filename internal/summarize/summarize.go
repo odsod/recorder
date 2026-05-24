@@ -1,21 +1,14 @@
 package summarize
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
-	"io"
-	"net/http"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
-	"github.com/odsod/recorder/internal/config"
-	"github.com/odsod/recorder/internal/httpclient"
+	"github.com/odsod/recorder/internal/llm"
 	"github.com/odsod/recorder/internal/segment"
 	"github.com/odsod/recorder/internal/transcript"
 )
@@ -25,12 +18,20 @@ const (
 	maxRetries = 2
 )
 
-func SummarizeSegment(
+type Summarizer struct {
+	llm *llm.Client
+}
+
+func NewSummarizer(client *llm.Client) *Summarizer {
+	return &Summarizer{llm: client}
+}
+
+func (s *Summarizer) SummarizeSegment(
 	ctx context.Context,
 	seg segment.Segment,
-	cfg config.LLMConfig,
 	date string,
 ) (title, summary string, skip bool, err error) {
+	_ = date
 	transcriptText := segment.FormatTranscript(seg)
 	if strings.TrimSpace(transcriptText) == "" {
 		return "", "", true, nil
@@ -38,9 +39,9 @@ func SummarizeSegment(
 
 	var response map[string]any
 	if len(transcriptText) <= chunkChars {
-		response, err = callLLM(ctx, summarizePrompt, transcriptText, cfg)
+		response, err = s.callLLM(ctx, summarizePrompt, transcriptText)
 	} else {
-		response, err = summarizeChunked(ctx, transcriptText, cfg)
+		response, err = s.summarizeChunked(ctx, transcriptText)
 	}
 
 	if err != nil {
@@ -54,19 +55,19 @@ func SummarizeSegment(
 	}
 
 	t, _ := response["title"].(string)
-	s, _ := response["summary"].(string)
+	sum, _ := response["summary"].(string)
 	if t == "" {
 		t = "Untitled"
 	}
-	return t, s, false, nil
+	return t, sum, false, nil
 }
 
-func summarizeChunked(ctx context.Context, transcript string, cfg config.LLMConfig) (map[string]any, error) {
-	chunks := splitIntoChunks(transcript, chunkChars)
+func (s *Summarizer) summarizeChunked(ctx context.Context, transcriptText string) (map[string]any, error) {
+	chunks := splitIntoChunks(transcriptText, chunkChars)
 	var chunkSummaries []map[string]any
 
 	for _, chunk := range chunks {
-		result, err := callLLM(ctx, summarizePrompt, chunk, cfg)
+		result, err := s.callLLM(ctx, summarizePrompt, chunk)
 		if err != nil {
 			continue
 		}
@@ -85,12 +86,16 @@ func summarizeChunked(ctx context.Context, transcript string, cfg config.LLMConf
 	}
 
 	var parts []string
-	for _, s := range chunkSummaries {
-		data, _ := json.MarshalIndent(s, "", "  ")
+	for _, summary := range chunkSummaries {
+		data, _ := json.MarshalIndent(summary, "", "  ")
 		parts = append(parts, string(data))
 	}
 	combinedInput := strings.Join(parts, "\n\n---\n\n")
-	return callLLM(ctx, combinePrompt, combinedInput, cfg)
+	return s.callLLM(ctx, combinePrompt, combinedInput)
+}
+
+func (s *Summarizer) callLLM(ctx context.Context, system, user string) (map[string]any, error) {
+	return s.llm.CompleteJSONWithRetry(ctx, system, user, maxRetries)
 }
 
 func splitIntoChunks(text string, maxChars int) []string {
@@ -122,10 +127,7 @@ func splitIntoChunks(text string, maxChars int) []string {
 	return chunks
 }
 
-var (
-	timeRe        = regexp.MustCompile(`^\[(\d{2}):(\d{2})\]`)
-	jsonExtractRe = regexp.MustCompile(`\{[\s\S]*\}`)
-)
+var timeRe = regexp.MustCompile(`^\[(\d{2}):(\d{2})\]`)
 
 func findBestSplit(lines []string, start, end int) int {
 	searchStart := start + (end-start)/2
@@ -148,83 +150,6 @@ func findBestSplit(lines []string, start, end int) int {
 		}
 	}
 	return bestIdx
-}
-
-func callLLM(ctx context.Context, system, user string, cfg config.LLMConfig) (map[string]any, error) {
-	var lastErr error
-	for range 1 + maxRetries {
-		result, err := doLLMCall(ctx, system, user, cfg)
-		if err == nil && result != nil {
-			return result, nil
-		}
-		if err != nil {
-			lastErr = err
-		}
-	}
-	return nil, fmt.Errorf("llm failed after %d attempts: %w", 1+maxRetries, lastErr)
-}
-
-func doLLMCall(ctx context.Context, system, user string, cfg config.LLMConfig) (map[string]any, error) {
-	payload := map[string]any{
-		"model": cfg.Model,
-		"messages": []map[string]string{
-			{"role": "system", "content": system},
-			{"role": "user", "content": user},
-		},
-		"temperature": 0.3,
-		"max_tokens":  4096,
-	}
-
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return nil, err
-	}
-
-	reqCtx, cancel := context.WithTimeout(ctx, time.Duration(cfg.TimeoutS)*time.Second)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(reqCtx, "POST", cfg.URL, bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := httpclient.Shared.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	var result struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return nil, err
-	}
-	if len(result.Choices) == 0 {
-		return nil, errors.New("no choices in response")
-	}
-
-	content := result.Choices[0].Message.Content
-	m := jsonExtractRe.FindString(content)
-	if m == "" {
-		return nil, errors.New("no JSON in response")
-	}
-
-	var parsed map[string]any
-	if err := json.Unmarshal([]byte(m), &parsed); err != nil {
-		return nil, err
-	}
-	return parsed, nil
 }
 
 // ExtractParticipants extracts unique participant names from participant events.

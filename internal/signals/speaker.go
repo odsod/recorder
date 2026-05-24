@@ -4,19 +4,35 @@ import (
 	"context"
 	"time"
 
-	"github.com/odsod/recorder/internal/cdp"
 	"github.com/odsod/recorder/internal/timeline"
 )
 
+type ParticipantState struct {
+	Name     string
+	Speaking bool
+}
+
+type MeetingChange struct {
+	Title string
+}
+
+type PollResult struct {
+	Participants  []ParticipantState
+	MeetingChange *MeetingChange
+}
+
+type SpeakerPoller interface {
+	Poll(ctx context.Context) (PollResult, error)
+}
+
 func RunSpeakerCollector(
 	ctx context.Context,
+	detector SpeakerPoller,
 	speakerTimeline *timeline.SpeakerTimeline,
 	participantSet *timeline.ParticipantSet,
 	meetingState *timeline.MeetingState,
-	ports []int,
 	log func(string),
 ) {
-	detector := cdp.NewSpeakerDetector(ports)
 	var activeSpeaker string
 
 	ticker := time.NewTicker(1 * time.Second)

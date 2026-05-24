@@ -13,12 +13,20 @@ import (
 	"time"
 
 	"github.com/odsod/recorder/internal/config"
-	"github.com/odsod/recorder/internal/httpclient"
 )
 
 var spaceRe = regexp.MustCompile(`\s+`)
 
-func TranscribeChunk(ctx context.Context, wavData []byte, filename string, cfg config.WhisperConfig) (string, error) {
+type WhisperClient struct {
+	http *http.Client
+	cfg  config.WhisperConfig
+}
+
+func NewWhisperClient(httpClient *http.Client, cfg config.WhisperConfig) *WhisperClient {
+	return &WhisperClient{http: httpClient, cfg: cfg}
+}
+
+func (c *WhisperClient) Transcribe(ctx context.Context, wavData []byte, filename string) (string, error) {
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 
@@ -40,16 +48,16 @@ func TranscribeChunk(ctx context.Context, wavData []byte, filename string, cfg c
 		return "", err
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(cfg.TimeoutS)*time.Second)
+	reqCtx, cancel := context.WithTimeout(ctx, time.Duration(c.cfg.TimeoutS)*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, "POST", cfg.URL, &body)
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, c.cfg.URL, &body)
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 
-	resp, err := httpclient.Shared.Do(req)
+	resp, err := c.http.Do(req)
 	if err != nil {
 		return "", err
 	}

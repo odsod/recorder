@@ -25,6 +25,7 @@ type PollResult struct {
 }
 
 type SpeakerDetector struct {
+	client         *Client
 	ports          []int
 	activeWSURL    string
 	activeTitle    string
@@ -33,8 +34,8 @@ type SpeakerDetector struct {
 	prevSnapshot   map[string]map[string]struct{}
 }
 
-func NewSpeakerDetector(ports []int) *SpeakerDetector {
-	return &SpeakerDetector{ports: ports}
+func NewSpeakerDetector(client *Client, ports []int) *SpeakerDetector {
+	return &SpeakerDetector{client: client, ports: ports}
 }
 
 func (d *SpeakerDetector) Poll(ctx context.Context) (PollResult, error) {
@@ -83,7 +84,7 @@ func (d *SpeakerDetector) Poll(ctx context.Context) (PollResult, error) {
 
 func (d *SpeakerDetector) findMeetingTab(ctx context.Context) (string, Tab, *PlatformConfig, error) {
 	for _, port := range d.ports {
-		tabs, err := listTabs(ctx, port)
+		tabs, err := d.client.ListTabs(ctx, port)
 		if err != nil {
 			continue
 		}

@@ -2,9 +2,7 @@ package recorder
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"io"
 	"strings"
 	"time"
 
@@ -82,37 +80,15 @@ func (s *captureState) trimmedPCM() (sys, mic []byte) {
 }
 
 func (r *Recorder) captureLoop(ctx context.Context, chunkCh chan<- AudioChunk) {
-	monitor, err := audio.GetMonitorSource(ctx)
+	frames, err := r.svc.Capture.Start(ctx)
 	if err != nil {
 		r.log(fmt.Sprintf("ERROR: %v", err))
 		return
 	}
-	micSource, err := audio.GetMicSource(ctx)
-	if err != nil {
-		r.log(fmt.Sprintf("ERROR: %v", err))
-		return
-	}
-	r.log("system: " + monitor)
-	r.log("mic: " + micSource)
+	defer func() { _ = r.svc.Capture.Stop() }()
 
-	sysCmd, sysReader, err := audio.StartParec(ctx, monitor, audio.SampleRate)
-	if err != nil {
-		r.log(fmt.Sprintf("ERROR starting sys parec: %v", err))
-		return
-	}
-	micCmd, micReader, err := audio.StartParec(ctx, micSource, audio.SampleRate)
-	if err != nil {
-		r.log(fmt.Sprintf("ERROR starting mic parec: %v", err))
-		_ = sysCmd.Process.Kill()
-		return
-	}
-
-	defer func() {
-		_ = sysCmd.Process.Kill()
-		_ = sysCmd.Wait()
-		_ = micCmd.Process.Kill()
-		_ = micCmd.Wait()
-	}()
+	r.log("system: " + r.svc.Capture.MonitorSource())
+	r.log("mic: " + r.svc.Capture.MicSource())
 
 	var state captureState
 	r.log("listening")
@@ -124,72 +100,69 @@ func (r *Recorder) captureLoop(ctx context.Context, chunkCh chan<- AudioChunk) {
 				r.emitChunk(state.sysBuf, state.micBuf, state.chunkStartTime, chunkCh)
 			}
 			return
-		default:
-		}
-
-		if err := r.lk.Heartbeat(); err != nil {
-			r.log(fmt.Sprintf("heartbeat: %v", err))
-		}
-
-		sysData, err := audio.ReadFrame(sysReader)
-		if err != nil {
-			if !errors.Is(err, io.EOF) {
-				r.log(fmt.Sprintf("sys read error: %v", err))
-			}
-			r.log("system audio ended")
-			return
-		}
-		micData, err := audio.ReadFrame(micReader)
-		if err != nil {
-			micData = audio.SilentFrame()
-		}
-
-		state.ingest(sysData, micData)
-
-		sysRMS := audio.ComputeRMS(sysData)
-		micRMS := audio.ComputeRMS(micData)
-		secondHasSpeech := sysRMS >= audio.SpeechRMSThreshold || micRMS >= audio.SpeechRMSThreshold
-
-		if secondHasSpeech {
-			if !state.wasSpeech {
-				var src []string
-				if sysRMS >= audio.SpeechRMSThreshold {
-					src = append(src, fmt.Sprintf("sys=%.4f", sysRMS))
+		case frame, ok := <-frames:
+			if !ok {
+				if state.hasSpeech && len(state.sysBuf) >= audio.MinChunkSecs*audio.FrameBytes {
+					r.emitChunk(state.sysBuf, state.micBuf, state.chunkStartTime, chunkCh)
 				}
-				if micRMS >= audio.SpeechRMSThreshold {
-					src = append(src, fmt.Sprintf("mic=%.4f", micRMS))
-				}
-				r.log(fmt.Sprintf("speech detected (%s)", strings.Join(src, ", ")))
-				state.wasSpeech = true
+				r.log("audio capture ended")
+				return
 			}
-			state.recordSpeech()
-			r.silenceMonitor.Reset()
-		} else {
-			if state.wasSpeech && state.consecutiveSilentSecs == 1 {
-				r.log("silence")
-				state.wasSpeech = false
-			}
-			state.recordSilence()
-			if r.silenceMonitor.Tick(state.consecutiveSilentSecs) {
-				mins := state.consecutiveSilentSecs / 60
-				e := transcript.Event{
-					Time: time.Now(),
-					Type: transcript.Idle,
-					Text: fmt.Sprintf("%d min", mins),
-				}
-				r.appendEvent(e)
-			}
-			r.segmenter.OnSilence(state.consecutiveSilentSecs)
+			r.processFrame(&state, frame, chunkCh)
 		}
+	}
+}
 
-		switch state.action() {
-		case actionDiscard:
-			state.reset()
-		case actionEmit:
-			sys, mic := state.trimmedPCM()
-			r.emitChunk(sys, mic, state.chunkStartTime, chunkCh)
-			state.reset()
+func (r *Recorder) processFrame(state *captureState, frame audio.Frame, chunkCh chan<- AudioChunk) {
+	if err := r.lk.Heartbeat(); err != nil {
+		r.log(fmt.Sprintf("heartbeat: %v", err))
+	}
+
+	state.ingest(frame.Sys, frame.Mic)
+
+	sysRMS := audio.ComputeRMS(frame.Sys)
+	micRMS := audio.ComputeRMS(frame.Mic)
+	secondHasSpeech := sysRMS >= audio.SpeechRMSThreshold || micRMS >= audio.SpeechRMSThreshold
+
+	if secondHasSpeech {
+		if !state.wasSpeech {
+			var src []string
+			if sysRMS >= audio.SpeechRMSThreshold {
+				src = append(src, fmt.Sprintf("sys=%.4f", sysRMS))
+			}
+			if micRMS >= audio.SpeechRMSThreshold {
+				src = append(src, fmt.Sprintf("mic=%.4f", micRMS))
+			}
+			r.log(fmt.Sprintf("speech detected (%s)", strings.Join(src, ", ")))
+			state.wasSpeech = true
 		}
+		state.recordSpeech()
+		r.silenceMonitor.Reset()
+	} else {
+		if state.wasSpeech && state.consecutiveSilentSecs == 1 {
+			r.log("silence")
+			state.wasSpeech = false
+		}
+		state.recordSilence()
+		if r.silenceMonitor.Tick(state.consecutiveSilentSecs) {
+			mins := state.consecutiveSilentSecs / 60
+			e := transcript.Event{
+				Time: time.Now(),
+				Type: transcript.Idle,
+				Text: fmt.Sprintf("%d min", mins),
+			}
+			r.appendEvent(e)
+		}
+		r.segmenter.OnSilence(state.consecutiveSilentSecs)
+	}
+
+	switch state.action() {
+	case actionDiscard:
+		state.reset()
+	case actionEmit:
+		sys, mic := state.trimmedPCM()
+		r.emitChunk(sys, mic, state.chunkStartTime, chunkCh)
+		state.reset()
 	}
 }
 
