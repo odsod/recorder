@@ -4,12 +4,13 @@ import (
 	"context"
 
 	"github.com/odsod/recorder/internal/audio"
+	"github.com/odsod/recorder/internal/protocol/whisper"
 	"github.com/odsod/recorder/internal/segment"
 	"github.com/odsod/recorder/internal/signals"
 )
 
 type Transcriber interface {
-	Transcribe(ctx context.Context, wav []byte, filename string) (string, error)
+	Transcribe(ctx context.Context, req whisper.TranscribeRequest) (whisper.TranscribeResponse, error)
 }
 
 type TextCleaner interface {

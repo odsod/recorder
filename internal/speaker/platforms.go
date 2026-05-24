@@ -1,4 +1,4 @@
-package cdp
+package speaker
 
 type PlatformConfig struct {
 	Name           string
