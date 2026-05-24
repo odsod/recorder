@@ -41,13 +41,13 @@ Critical invariant: only the transcription goroutine calls `transcript.Append()`
 - **Binary**: single static binary → `~/.local/bin/recorder`
 - **External deps**: none (stdlib only)
 - **Config**: JSON (`$XDG_CONFIG_HOME/recorder/config.json`, default `~/.config/recorder/config.json`)
-- **Build**: `go build -o ~/.local/bin/recorder ./cmd/recorder`
+- **Build**: `go build -o ~/.local/bin/recorder .`
 
 ## Structure
 
 ```
 recorder/
-├── cmd/recorder/main.go          # Entrypoint, subcommand dispatch
+├── main.go                       # Entrypoint, subcommand dispatch
 ├── internal/
 │   ├── protocol/                 # Wire-protocol clients (one per external service)
 │   │   ├── llm/                  # OpenAI chat completions (HTTP JSON)

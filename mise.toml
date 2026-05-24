@@ -28,4 +28,4 @@ fi
 
 [tasks.install]
 description = "Build and install recorder binary"
-run = "go install ./cmd/recorder"
+run = "go install ."
