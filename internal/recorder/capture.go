@@ -3,6 +3,7 @@ package recorder
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -82,40 +83,53 @@ func (s *captureState) trimmedPCM() (sys, mic []byte) {
 func (r *Recorder) captureLoop(ctx context.Context, chunkCh chan<- AudioChunk) {
 	frames, err := r.svc.Capture.Start(ctx)
 	if err != nil {
-		r.log(fmt.Sprintf("ERROR: %v", err))
+		slog.ErrorContext(ctx, "capture start failed",
+			"err", err,
+		)
 		return
 	}
 	defer func() { _ = r.svc.Capture.Stop() }()
 
-	r.log("system: " + r.svc.Capture.MonitorSource())
-	r.log("mic: " + r.svc.Capture.MicSource())
+	slog.InfoContext(ctx, "system source configured",
+		"source", r.svc.Capture.MonitorSource(),
+	)
+	slog.InfoContext(ctx, "mic source configured",
+		"source", r.svc.Capture.MicSource(),
+	)
 
 	var state captureState
-	r.log("listening")
+	slog.InfoContext(ctx, "listening")
 
 	for {
 		select {
 		case <-ctx.Done():
 			if state.hasSpeech && len(state.sysBuf) >= audio.MinChunkSecs*audio.FrameBytes {
-				r.emitChunk(state.sysBuf, state.micBuf, state.chunkStartTime, chunkCh)
+				r.emitChunk(ctx, state.sysBuf, state.micBuf, state.chunkStartTime, chunkCh)
 			}
 			return
 		case frame, ok := <-frames:
 			if !ok {
 				if state.hasSpeech && len(state.sysBuf) >= audio.MinChunkSecs*audio.FrameBytes {
-					r.emitChunk(state.sysBuf, state.micBuf, state.chunkStartTime, chunkCh)
+					r.emitChunk(ctx, state.sysBuf, state.micBuf, state.chunkStartTime, chunkCh)
 				}
-				r.log("audio capture ended")
+				slog.InfoContext(ctx, "audio capture ended")
 				return
 			}
-			r.processFrame(&state, frame, chunkCh)
+			r.processFrame(ctx, &state, frame, chunkCh)
 		}
 	}
 }
 
-func (r *Recorder) processFrame(state *captureState, frame audio.Frame, chunkCh chan<- AudioChunk) {
+func (r *Recorder) processFrame(
+	ctx context.Context,
+	state *captureState,
+	frame audio.Frame,
+	chunkCh chan<- AudioChunk,
+) {
 	if err := r.lk.Heartbeat(); err != nil {
-		r.log(fmt.Sprintf("heartbeat: %v", err))
+		slog.ErrorContext(ctx, "heartbeat failed",
+			"err", err,
+		)
 	}
 
 	state.ingest(frame.Sys, frame.Mic)
@@ -133,14 +147,16 @@ func (r *Recorder) processFrame(state *captureState, frame audio.Frame, chunkCh 
 			if micRMS >= audio.SpeechRMSThreshold {
 				src = append(src, fmt.Sprintf("mic=%.4f", micRMS))
 			}
-			r.log(fmt.Sprintf("speech detected (%s)", strings.Join(src, ", ")))
+			slog.InfoContext(ctx, "speech detected",
+				"sources", strings.Join(src, ", "),
+			)
 			state.wasSpeech = true
 		}
 		state.recordSpeech()
 		r.silenceMonitor.Reset()
 	} else {
 		if state.wasSpeech && state.consecutiveSilentSecs == 1 {
-			r.log("silence")
+			slog.InfoContext(ctx, "silence")
 			state.wasSpeech = false
 		}
 		state.recordSilence()
@@ -151,7 +167,7 @@ func (r *Recorder) processFrame(state *captureState, frame audio.Frame, chunkCh 
 				Type: transcript.Idle,
 				Text: fmt.Sprintf("%d min", mins),
 			}
-			r.appendEvent(e)
+			r.appendEvent(ctx, e)
 		}
 		r.segmenter.OnSilence(state.consecutiveSilentSecs)
 	}
@@ -161,12 +177,17 @@ func (r *Recorder) processFrame(state *captureState, frame audio.Frame, chunkCh 
 		state.reset()
 	case actionEmit:
 		sys, mic := state.trimmedPCM()
-		r.emitChunk(sys, mic, state.chunkStartTime, chunkCh)
+		r.emitChunk(ctx, sys, mic, state.chunkStartTime, chunkCh)
 		state.reset()
 	}
 }
 
-func (r *Recorder) emitChunk(sysPCM, micPCM []byte, startTime time.Time, chunkCh chan<- AudioChunk) {
+func (r *Recorder) emitChunk(
+	ctx context.Context,
+	sysPCM, micPCM []byte,
+	startTime time.Time,
+	chunkCh chan<- AudioChunk,
+) {
 	r.chunkNum++
 	endTime := time.Now()
 	duration := len(sysPCM) / audio.FrameBytes
@@ -174,12 +195,22 @@ func (r *Recorder) emitChunk(sysPCM, micPCM []byte, startTime time.Time, chunkCh
 	micRMS := audio.ComputeRMS(micPCM)
 
 	if sysRMS < audio.ChunkRMSThreshold && micRMS < audio.ChunkRMSThreshold {
-		r.log(fmt.Sprintf("chunk #%d: %ds sys=%.4f mic=%.4f (below threshold, skipped)",
-			r.chunkNum, duration, sysRMS, micRMS))
+		slog.InfoContext(ctx, "chunk skipped",
+			"chunkNum", r.chunkNum,
+			"durationSec", duration,
+			"sysRms", sysRMS,
+			"micRms", micRMS,
+			"reason", "below threshold",
+		)
 		return
 	}
 
-	r.log(fmt.Sprintf("chunk #%d: %ds sys=%.4f mic=%.4f", r.chunkNum, duration, sysRMS, micRMS))
+	slog.InfoContext(ctx, "chunk emitted",
+		"chunkNum", r.chunkNum,
+		"durationSec", duration,
+		"sysRms", sysRMS,
+		"micRms", micRMS,
+	)
 
 	chunkCh <- AudioChunk{
 		SysWAV:    audio.MakeWAV(sysPCM, audio.SampleRate),

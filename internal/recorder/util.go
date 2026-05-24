@@ -1,10 +1,17 @@
 package recorder
 
-import "github.com/odsod/recorder/internal/transcript"
+import (
+	"context"
+	"log/slog"
 
-func (r *Recorder) appendEvent(e transcript.Event) {
+	"github.com/odsod/recorder/internal/transcript"
+)
+
+func (r *Recorder) appendEvent(ctx context.Context, e transcript.Event) {
 	r.transcript.AppendEvent(e)
-	r.log(e.String())
+	slog.InfoContext(ctx, "transcript event",
+		"line", e.String(),
+	)
 }
 
 func truncate(s string, n int) string {

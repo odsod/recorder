@@ -2,7 +2,7 @@ package recorder
 
 import (
 	"context"
-	"fmt"
+	"log/slog"
 	"maps"
 	"slices"
 	"time"
@@ -14,10 +14,12 @@ import (
 
 func (r *Recorder) transcriptionWorker(ctx context.Context, chunkCh <-chan AudioChunk) {
 	for chunk := range chunkCh {
-		r.log("transcribing")
+		slog.InfoContext(ctx, "transcribing")
 		t0 := time.Now()
 		r.transcribeChunk(ctx, chunk)
-		r.log(fmt.Sprintf("transcribed in %.1fs", time.Since(t0).Seconds()))
+		slog.InfoContext(ctx, "transcribed",
+			"durationSec", time.Since(t0).Seconds(),
+		)
 	}
 }
 
@@ -26,19 +28,23 @@ func (r *Recorder) transcribeChunk(ctx context.Context, chunk AudioChunk) {
 		WAVData: chunk.SysWAV, Filename: "sys.wav",
 	})
 	if err != nil {
-		r.log(fmt.Sprintf("transcribe sys: %v", err))
+		slog.ErrorContext(ctx, "transcribe sys failed",
+			"err", err,
+		)
 	}
 	micResp, err := r.svc.Transcriber.Transcribe(ctx, whisper.TranscribeRequest{
 		WAVData: chunk.MicWAV, Filename: "mic.wav",
 	})
 	if err != nil {
-		r.log(fmt.Sprintf("transcribe mic: %v", err))
+		slog.ErrorContext(ctx, "transcribe mic failed",
+			"err", err,
+		)
 	}
 
 	sysText := sysResp.Text
 	micText := micResp.Text
 
-	r.flushSignalEvents(chunk.StartTime, chunk.EndTime)
+	r.flushSignalEvents(ctx, chunk.StartTime, chunk.EndTime)
 
 	speakers := r.speakerTimeline.SpeakersIn(chunk.StartTime, chunk.EndTime)
 	speaker := ""
@@ -50,7 +56,9 @@ func (r *Recorder) transcribeChunk(ctx context.Context, chunk AudioChunk) {
 	case sysText != "":
 		cleaned, err := r.svc.Cleaner.Cleanup(ctx, sysText)
 		if err != nil {
-			r.log(fmt.Sprintf("cleanup sys: %v", err))
+			slog.ErrorContext(ctx, "cleanup sys failed",
+				"err", err,
+			)
 		}
 		if cleaned == "" {
 			cleaned = sysText
@@ -63,14 +71,16 @@ func (r *Recorder) transcribeChunk(ctx context.Context, chunk AudioChunk) {
 				Text:    cleaned,
 				Speaker: speaker,
 			}
-			r.appendEvent(e)
+			r.appendEvent(ctx, e)
 			r.lastSystemText = cleaned
 			r.segmenter.OnSpeech(e)
 
 			if micText != "" && !transcribe.TextsOverlap(cleaned, micText, r.cfg.Dedup.Threshold) {
 				micCleaned, err := r.svc.Cleaner.Cleanup(ctx, micText)
 				if err != nil {
-					r.log(fmt.Sprintf("cleanup mic: %v", err))
+					slog.ErrorContext(ctx, "cleanup mic failed",
+						"err", err,
+					)
 				}
 				if micCleaned == "" {
 					micCleaned = micText
@@ -83,18 +93,22 @@ func (r *Recorder) transcribeChunk(ctx context.Context, chunk AudioChunk) {
 						Text:    micCleaned,
 						Speaker: speaker,
 					}
-					r.appendEvent(me)
+					r.appendEvent(ctx, me)
 					r.segmenter.OnSpeech(me)
 				}
 			}
 		}
 	case micText != "":
 		if r.lastSystemText != "" && transcribe.TextsOverlap(r.lastSystemText, micText, r.cfg.Dedup.Threshold) {
-			r.log("mic: (dedup) " + truncate(micText, 60))
+			slog.InfoContext(ctx, "mic deduped",
+				"text", truncate(micText, 60),
+			)
 		} else {
 			cleaned, err := r.svc.Cleaner.Cleanup(ctx, micText)
 			if err != nil {
-				r.log(fmt.Sprintf("cleanup mic: %v", err))
+				slog.ErrorContext(ctx, "cleanup mic failed",
+					"err", err,
+				)
 			}
 			if cleaned == "" {
 				cleaned = micText
@@ -107,17 +121,17 @@ func (r *Recorder) transcribeChunk(ctx context.Context, chunk AudioChunk) {
 					Text:    cleaned,
 					Speaker: speaker,
 				}
-				r.appendEvent(e)
+				r.appendEvent(ctx, e)
 				r.segmenter.OnSpeech(e)
 			}
 		}
 	default:
-		r.log("(no speech detected)")
+		slog.InfoContext(ctx, "no speech detected")
 	}
-	r.log("listening")
+	slog.InfoContext(ctx, "listening")
 }
 
-func (r *Recorder) flushSignalEvents(start, end time.Time) {
+func (r *Recorder) flushSignalEvents(ctx context.Context, start, end time.Time) {
 	r.lastFlushedTime = end
 
 	if title, changedAt, ok := r.meetingState.Consume(); ok {
@@ -126,7 +140,7 @@ func (r *Recorder) flushSignalEvents(start, end time.Time) {
 			Type:  transcript.Meeting,
 			Title: title,
 		}
-		r.appendEvent(e)
+		r.appendEvent(ctx, e)
 		r.segmenter.OnEvent(e)
 		if title != "" {
 			r.segmenter.OnMeetingChange(title, changedAt)
@@ -141,7 +155,7 @@ func (r *Recorder) flushSignalEvents(start, end time.Time) {
 			Type:   transcript.Participants,
 			People: slices.Sorted(maps.Keys(allParticipants)),
 		}
-		r.appendEvent(e)
+		r.appendEvent(ctx, e)
 		r.segmenter.OnEvent(e)
 	}
 }

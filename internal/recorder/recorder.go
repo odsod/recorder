@@ -2,7 +2,7 @@ package recorder
 
 import (
 	"context"
-	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -52,7 +52,7 @@ func New(ctx context.Context, cfg config.Config, lk *lock.RecorderLock, svc Serv
 		lastPplSet:      make(map[string]struct{}),
 	}
 
-	r.segmenter = segment.NewSegmenter(ctx, svc.SegmentHandler, r.log, func(e transcript.Event) {
+	r.segmenter = segment.NewSegmenter(ctx, svc.SegmentHandler, func(e transcript.Event) {
 		t.AppendEvent(e)
 	})
 
@@ -61,11 +61,17 @@ func New(ctx context.Context, cfg config.Config, lk *lock.RecorderLock, svc Serv
 
 // Run starts capture, transcription, and speaker detection until ctx is cancelled.
 func (r *Recorder) Run(ctx context.Context) error {
-	r.log("transcript: " + r.transcript.Path())
-	r.log("whisper: " + r.cfg.Whisper.URL)
-	r.log("llm: " + r.cfg.LLM.URL)
+	slog.InfoContext(ctx, "transcript configured",
+		"path", r.transcript.Path(),
+	)
+	slog.InfoContext(ctx, "whisper configured",
+		"url", r.cfg.Whisper.URL,
+	)
+	slog.InfoContext(ctx, "llm configured",
+		"url", r.cfg.LLM.URL,
+	)
 
-	r.appendEvent(transcript.Event{Time: time.Now(), Type: transcript.Recorder, Text: "started"})
+	r.appendEvent(ctx, transcript.Event{Time: time.Now(), Type: transcript.Recorder, Text: "started"})
 
 	chunkCh := make(chan AudioChunk, audioChunkBufferSize)
 
@@ -82,25 +88,19 @@ func (r *Recorder) Run(ctx context.Context) error {
 			r.speakerTimeline,
 			r.participantSet,
 			r.meetingState,
-			r.log,
 		)
 	})
 
-	r.log("signals started")
+	slog.InfoContext(ctx, "signals started")
 
 	r.captureLoop(ctx, chunkCh)
 	close(chunkCh)
 
 	wg.Wait()
 
-	r.appendEvent(transcript.Event{Time: time.Now(), Type: transcript.Recorder, Text: "stopped"})
-	r.log("running final segmentation...")
+	r.appendEvent(ctx, transcript.Event{Time: time.Now(), Type: transcript.Recorder, Text: "stopped"})
+	slog.InfoContext(ctx, "running final segmentation")
 	r.segmenter.Flush(ctx)
-	r.log("shutdown complete")
+	slog.InfoContext(ctx, "shutdown complete")
 	return nil
-}
-
-func (r *Recorder) log(msg string) {
-	ts := time.Now().Format("15:04:05")
-	fmt.Printf("[%s] %s\n", ts, msg)
 }

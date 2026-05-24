@@ -3,7 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
-	"os"
+	"log/slog"
 	"time"
 
 	"github.com/odsod/recorder/internal/config"
@@ -92,7 +92,10 @@ func (a *App) writeSegments(ctx context.Context, segments []segment.Segment, dat
 
 		title, summary, skip, err := a.deps.Summarizer.SummarizeSegment(ctx, seg, date)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "summarize error for %s: %v\n", seg.ID, err)
+			slog.ErrorContext(ctx, "summarize failed",
+				"segmentId", seg.ID,
+				"err", err,
+			)
 			continue
 		}
 		if skip {
@@ -101,7 +104,10 @@ func (a *App) writeSegments(ctx context.Context, segments []segment.Segment, dat
 		}
 		filename, err := summarize.WriteSegmentFile(title, summary, seg, date, a.cfg.Segments.OutputDir)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "write error for %s: %v\n", seg.ID, err)
+			slog.ErrorContext(ctx, "write segment failed",
+				"segmentId", seg.ID,
+				"err", err,
+			)
 			continue
 		}
 		fmt.Printf("  %s: wrote %s\n", seg.ID, filename)

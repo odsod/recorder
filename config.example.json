@@ -20,5 +20,8 @@
   "signals": {
     "silenceThresholdS": 180,
     "cdpPorts": [9222]
+  },
+  "log": {
+    "file": "~/.local/share/recorder/recorder.jsonl"
   }
 }

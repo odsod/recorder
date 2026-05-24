@@ -33,8 +33,15 @@ linters:
     - nolintlint
     - perfsprint
     - revive
+    - sloglint
     - unconvert
   settings:
+    sloglint:
+      context: "all"
+      key-naming-case: "camel"
+      kv-only: true
+      msg-style: "lowercased"
+      no-mixed-args: true
     revive:
       rules:
         - name: exported

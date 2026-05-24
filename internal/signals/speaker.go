@@ -2,6 +2,7 @@ package signals
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/odsod/recorder/internal/timeline"
@@ -36,7 +37,6 @@ func RunSpeakerCollector(
 	speakerTimeline *timeline.SpeakerTimeline,
 	participantSet *timeline.ParticipantSet,
 	meetingState *timeline.MeetingState,
-	log func(string),
 ) {
 	var activeSpeaker string
 
@@ -50,16 +50,20 @@ func RunSpeakerCollector(
 		case <-ticker.C:
 			result, err := detector.Poll(ctx)
 			if err != nil {
-				log("cdp: " + err.Error())
+				slog.ErrorContext(ctx, "cdp poll failed",
+					"err", err,
+				)
 				continue
 			}
 
 			if result.MeetingChange != nil {
 				meetingState.Set(result.MeetingChange.Title)
 				if result.MeetingChange.Title != "" {
-					log("meeting: " + result.MeetingChange.Title)
+					slog.InfoContext(ctx, "meeting joined",
+						"title", result.MeetingChange.Title,
+					)
 				} else {
-					log("meeting: ended")
+					slog.InfoContext(ctx, "meeting ended")
 				}
 				participantSet.Reset()
 			}
