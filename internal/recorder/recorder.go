@@ -10,7 +10,6 @@ import (
 	"github.com/odsod/recorder/internal/lock"
 	"github.com/odsod/recorder/internal/segment"
 	"github.com/odsod/recorder/internal/signals"
-	"github.com/odsod/recorder/internal/summarize"
 	"github.com/odsod/recorder/internal/timeline"
 	"github.com/odsod/recorder/internal/transcript"
 )
@@ -22,6 +21,7 @@ const (
 
 type Recorder struct {
 	cfg             config.Config
+	svc             Services
 	transcript      *TranscriptWriter
 	lk              *lock.RecorderLock
 	speakerTimeline *timeline.SpeakerTimeline
@@ -35,16 +35,12 @@ type Recorder struct {
 	lastPplSet      map[string]struct{}
 }
 
-func New(ctx context.Context, cfg config.Config) (*Recorder, error) {
+func New(ctx context.Context, cfg config.Config, lk *lock.RecorderLock, svc Services) (*Recorder, error) {
 	t := NewTranscriptWriter(cfg.Transcript.OutputDir)
-	lk := lock.New(cfg.Transcript.OutputDir)
-
-	if err := lk.Acquire(); err != nil {
-		return nil, err
-	}
 
 	r := &Recorder{
 		cfg:             cfg,
+		svc:             svc,
 		transcript:      t,
 		lk:              lk,
 		speakerTimeline: timeline.NewSpeakerTimeline(speakerTimelineMaxAgeSecs),
@@ -54,15 +50,7 @@ func New(ctx context.Context, cfg config.Config) (*Recorder, error) {
 		lastPplSet:      make(map[string]struct{}),
 	}
 
-	handler := &segment.FuncHandler{
-		SummarizeFn: func(ctx context.Context, seg segment.Segment, date string) (string, string, bool, error) {
-			return summarize.SummarizeSegment(ctx, seg, cfg.LLM, date)
-		},
-		WriteSegmentFn: func(title, summary string, seg segment.Segment, date string) (string, error) {
-			return summarize.WriteSegmentFile(title, summary, seg, date, cfg.Segments.OutputDir)
-		},
-	}
-	r.segmenter = segment.NewSegmenter(ctx, handler, r.log, func(e transcript.Event) {
+	r.segmenter = segment.NewSegmenter(ctx, svc.SegmentHandler, r.log, func(e transcript.Event) {
 		t.AppendEvent(e)
 	})
 
@@ -87,10 +75,10 @@ func (r *Recorder) Run(ctx context.Context) error {
 	wg.Go(func() {
 		signals.RunSpeakerCollector(
 			ctx,
+			r.svc.SpeakerDetector,
 			r.speakerTimeline,
 			r.participantSet,
 			r.meetingState,
-			r.cfg.Signals.CDPPorts,
 			r.log,
 		)
 	})
@@ -106,7 +94,6 @@ func (r *Recorder) Run(ctx context.Context) error {
 	r.log("running final segmentation...")
 	r.segmenter.Flush(ctx)
 	r.log("shutdown complete")
-	r.lk.Release()
 	return nil
 }
 

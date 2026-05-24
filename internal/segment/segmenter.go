@@ -30,10 +30,11 @@ func (h *FuncHandler) WriteSegment(title, summary string, seg Segment, date stri
 }
 
 type IncrementalSegmenter struct {
-	ctx          context.Context
-	handler      SegmentHandler
-	log          func(string)
-	appendSeg    func(transcript.Event)
+	ctx       context.Context
+	handler   SegmentHandler
+	log       func(string)
+	appendSeg func(transcript.Event)
+
 	events       []transcript.Event
 	speechEvents []transcript.Event
 	lastSpeech   time.Time
@@ -97,7 +98,8 @@ func (s *IncrementalSegmenter) OnPin(t time.Time) {
 	s.log("segmenter: boundary detected (pin)")
 }
 
-func (s *IncrementalSegmenter) Flush(ctx context.Context) {
+func (s *IncrementalSegmenter) Flush(_ context.Context) {
+	s.ctx = context.WithoutCancel(s.ctx)
 	if s.pending != nil && len(s.speechEvents) > 0 {
 		s.finalize()
 	} else if len(s.speechEvents) > 0 {

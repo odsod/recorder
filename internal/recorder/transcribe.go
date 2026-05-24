@@ -21,11 +21,11 @@ func (r *Recorder) transcriptionWorker(ctx context.Context, chunkCh <-chan Audio
 }
 
 func (r *Recorder) transcribeChunk(ctx context.Context, chunk AudioChunk) {
-	sysText, err := transcribe.TranscribeChunk(ctx, chunk.SysWAV, "sys.wav", r.cfg.Whisper)
+	sysText, err := r.svc.Transcriber.Transcribe(ctx, chunk.SysWAV, "sys.wav")
 	if err != nil {
 		r.log(fmt.Sprintf("transcribe sys: %v", err))
 	}
-	micText, err := transcribe.TranscribeChunk(ctx, chunk.MicWAV, "mic.wav", r.cfg.Whisper)
+	micText, err := r.svc.Transcriber.Transcribe(ctx, chunk.MicWAV, "mic.wav")
 	if err != nil {
 		r.log(fmt.Sprintf("transcribe mic: %v", err))
 	}
@@ -40,7 +40,7 @@ func (r *Recorder) transcribeChunk(ctx context.Context, chunk AudioChunk) {
 
 	switch {
 	case sysText != "":
-		cleaned, err := transcribe.CleanupText(ctx, sysText, r.cfg.LLM)
+		cleaned, err := r.svc.Cleaner.Cleanup(ctx, sysText)
 		if err != nil {
 			r.log(fmt.Sprintf("cleanup sys: %v", err))
 		}
@@ -60,7 +60,7 @@ func (r *Recorder) transcribeChunk(ctx context.Context, chunk AudioChunk) {
 			r.segmenter.OnSpeech(e)
 
 			if micText != "" && !transcribe.TextsOverlap(cleaned, micText, r.cfg.Dedup.Threshold) {
-				micCleaned, err := transcribe.CleanupText(ctx, micText, r.cfg.LLM)
+				micCleaned, err := r.svc.Cleaner.Cleanup(ctx, micText)
 				if err != nil {
 					r.log(fmt.Sprintf("cleanup mic: %v", err))
 				}
@@ -84,7 +84,7 @@ func (r *Recorder) transcribeChunk(ctx context.Context, chunk AudioChunk) {
 		if r.lastSystemText != "" && transcribe.TextsOverlap(r.lastSystemText, micText, r.cfg.Dedup.Threshold) {
 			r.log("mic: (dedup) " + truncate(micText, 60))
 		} else {
-			cleaned, err := transcribe.CleanupText(ctx, micText, r.cfg.LLM)
+			cleaned, err := r.svc.Cleaner.Cleanup(ctx, micText)
 			if err != nil {
 				r.log(fmt.Sprintf("cleanup mic: %v", err))
 			}
