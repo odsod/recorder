@@ -41,7 +41,7 @@ Critical invariant: only the transcription goroutine calls `transcript.Append()`
 - **Binary**: single static binary → `~/.local/bin/recorder`
 - **External deps**: none (stdlib only)
 - **Config**: JSON (`$XDG_CONFIG_HOME/recorder/config.json`, default `~/.config/recorder/config.json`)
-- **Build**: `go build -o ~/.local/bin/recorder .`
+- **Install**: `go install .`
 
 ## Structure
 
