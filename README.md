@@ -47,18 +47,85 @@ defaults are used.
 
 See [`config.example.json`](config.example.json) for all available fields.
 
-| Section      | Field               | Default                               | Description                               |
-| ------------ | ------------------- | ------------------------------------- | ----------------------------------------- |
-| `whisper`    | `url`               | `http://localhost:8178/v1/...`        | Whisper server transcription endpoint     |
-| `whisper`    | `timeoutS`          | `60`                                  | HTTP timeout for transcription requests   |
-| `llm`        | `url`               | `http://localhost:8179/v1/...`        | LLM server chat completions endpoint      |
-| `llm`        | `model`             | `default`                             | Model name sent in API requests           |
-| `llm`        | `timeoutS`          | `180`                                 | HTTP timeout for LLM requests             |
-| `transcript` | `outputDir`         | `~/.local/share/recorder/transcripts` | Directory for daily transcript files      |
-| `segments`   | `outputDir`         | `~/.local/share/recorder/segments`    | Directory for segment summary files       |
-| `dedup`      | `threshold`         | `0.6`                                 | Token overlap threshold for mic/sys dedup |
-| `signals`    | `silenceThresholdS` | `180`                                 | Silence duration before segment boundary  |
-| `signals`    | `cdpPorts`          | `[]`                                  | Chrome DevTools Protocol ports to poll    |
+| Section      | Field               | Default                               | Description                                |
+| ------------ | ------------------- | ------------------------------------- | ------------------------------------------ |
+| `whisper`    | `url`               | `http://localhost:8178/v1/...`        | Whisper server transcription endpoint      |
+| `whisper`    | `timeoutS`          | `60`                                  | HTTP timeout for transcription requests    |
+| `llm`        | `url`               | `http://localhost:8179/v1/...`        | LLM server chat completions endpoint       |
+| `llm`        | `model`             | `default`                             | Model name sent in API requests            |
+| `llm`        | `timeoutS`          | `180`                                 | HTTP timeout for LLM requests              |
+| `transcript` | `outputDir`         | `~/.local/share/recorder/transcripts` | Directory for daily transcript files       |
+| `segments`   | `outputDir`         | `~/.local/share/recorder/segments`    | Directory for segment summary files        |
+| `dedup`      | `threshold`         | `0.6`                                 | Token overlap threshold for mic/sys dedup  |
+| `signals`    | `silenceThresholdS` | `180`                                 | Silence duration before segment boundary   |
+| `signals`    | `cdpPorts`          | `[]`                                  | Chrome DevTools Protocol ports to poll     |
+| `promptVars` | (see below)         | built-in defaults                     | Template variables for LLM system prompts  |
+| `prompts`    | `cleanup`           | `""` (embedded)                       | Optional path to cleanup prompt template   |
+| `prompts`    | `summarize`         | `""` (embedded)                       | Optional path to summarize prompt template |
+| `prompts`    | `combine`           | `""` (embedded)                       | Optional path to combine prompt template   |
+
+### LLM prompts
+
+Three system prompts drive the pipeline: **cleanup** (transcript post-processing),
+**summarize** (segment summaries), and **combine** (map-reduce merge for long
+segments). Defaults are embedded in the binary
+([`internal/config/prompts/`](internal/config/prompts/)) and rendered with Go
+`text/template` at startup.
+
+**`promptVars`** — personalize prompts without forking the full template:
+
+| Field               | Description                                                    |
+| ------------------- | -------------------------------------------------------------- |
+| `languages`         | Languages spoken (e.g. `["Swedish", "English"]`)               |
+| `fillerWords`       | Filler words to strip during cleanup                           |
+| `owner.role`        | Role framing for summarize intro (e.g. `"software engineer"`)  |
+| `owner.summaryFor`  | Summary destination (e.g. `"a human inbox"`)                   |
+| `includeInSummary`  | Bullet list of what to capture in summaries                    |
+| `titleMaxWords`     | Max words in segment titles (default `8`)                      |
+| `skipMaxGreetLines` | Skip threshold for pure greeting segments (default `3`)        |
+| `titleStopWords`    | Stop words to avoid in titles                                  |
+| `summaryLabels`     | Suggested bold labels in summaries (`Decided:`, `Insight:`, …) |
+
+**`prompts`** — optional file paths to override the embedded templates. Paths
+are templates too (vars still apply). If a configured file is missing, the
+embedded template is seeded to that path on first load.
+
+Not configurable: `mic`/`sys` channel definitions, JSON output schema, and
+other recorder-specific semantics baked into the templates.
+
+Example:
+
+```json
+{
+  "promptVars": {
+    "languages": ["English"],
+    "owner": { "role": "product manager", "summaryFor": "weekly notes" }
+  },
+  "prompts": {
+    "summarize": "~/.config/recorder/prompts/summarize.md"
+  }
+}
+```
+
+## Usage
+
+```bash
+recorder run                              # start the daemon
+recorder note                             # interactive note (stdin)
+recorder note "meeting started late"      # note via CLI argument
+recorder segment <transcript>             # show segments (dry-run)
+recorder segment <transcript> --write     # write segment files + transcript markers
+recorder segment <transcript> --boundaries  # show boundaries only (no LLM)
+recorder prompts                            # print resolved system prompts (debug)
+recorder prompts cleanup                    # print one prompt
+recorder prompts summarize combine          # print a subset
+```
+
+Inspect final rendered prompts after config changes:
+
+```bash
+recorder prompts summarize
+```
 
 ## Output
 
@@ -111,17 +178,6 @@ type: segment
 source: "[[raw/transcripts/2026-05-23-recorder.md]]"
 participants: ["Alice Smith", "Bob Johnson"]
 ---
-```
-
-## Usage
-
-```bash
-recorder run                              # start the daemon
-recorder note                             # interactive note (stdin)
-recorder note "meeting started late"      # note via CLI argument
-recorder segment <transcript>             # show segments (dry-run)
-recorder segment <transcript> --write     # write segment files + transcript markers
-recorder segment <transcript> --boundaries  # show boundaries only (no LLM)
 ```
 
 ## Chrome DevTools Protocol

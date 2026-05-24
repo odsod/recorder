@@ -91,4 +91,7 @@ func TestLoad_MissingFile(t *testing.T) {
 	if cfg.Whisper.URL == "" {
 		t.Error("should return defaults when config file missing")
 	}
+	if cfg.Prompts.Cleanup == "" {
+		t.Error("should resolve prompts when config file missing")
+	}
 }
