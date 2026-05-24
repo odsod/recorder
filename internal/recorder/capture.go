@@ -7,78 +7,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/odsod/recorder/internal/audio"
+	"github.com/odsod/recorder/internal/audio/chunk"
+	"github.com/odsod/recorder/internal/audio/frame"
+	"github.com/odsod/recorder/internal/audio/gate"
+	"github.com/odsod/recorder/internal/audio/pcm"
+	"github.com/odsod/recorder/internal/audio/wav"
 	"github.com/odsod/recorder/internal/transcript"
 )
-
-type captureAction int
-
-const (
-	actionNone captureAction = iota
-	actionEmit
-	actionDiscard
-)
-
-type captureState struct {
-	sysBuf                []byte
-	micBuf                []byte
-	hasSpeech             bool
-	consecutiveSilentSecs int
-	wasSpeech             bool
-	chunkStartTime        time.Time
-}
-
-func (s *captureState) reset() {
-	s.sysBuf = s.sysBuf[:0]
-	s.micBuf = s.micBuf[:0]
-	s.hasSpeech = false
-	s.consecutiveSilentSecs = 0
-	s.wasSpeech = false
-	s.chunkStartTime = time.Time{}
-}
-
-func (s *captureState) ingest(sysData, micData []byte) {
-	if s.chunkStartTime.IsZero() {
-		s.chunkStartTime = time.Now()
-	}
-	s.sysBuf = append(s.sysBuf, sysData...)
-	s.micBuf = append(s.micBuf, micData...)
-}
-
-func (s *captureState) recordSpeech() {
-	s.hasSpeech = true
-	s.consecutiveSilentSecs = 0
-}
-
-func (s *captureState) recordSilence() {
-	s.consecutiveSilentSecs++
-}
-
-func (s *captureState) action() captureAction {
-	bufSecs := len(s.sysBuf) / audio.FrameBytes
-
-	if !s.hasSpeech && bufSecs >= 5 {
-		return actionDiscard
-	}
-
-	if s.hasSpeech && bufSecs >= audio.MinChunkSecs {
-		if s.consecutiveSilentSecs >= 1 {
-			return actionEmit
-		}
-		if bufSecs >= audio.ChunkMaxSecs {
-			return actionEmit
-		}
-	}
-	return actionNone
-}
-
-func (s *captureState) trimmedPCM() (sys, mic []byte) {
-	trimBytes := max(0, s.consecutiveSilentSecs-1) * audio.FrameBytes
-	if trimBytes > 0 && trimBytes < len(s.sysBuf) {
-		return s.sysBuf[:len(s.sysBuf)-trimBytes], s.micBuf[:len(s.micBuf)-trimBytes]
-	}
-	return s.sysBuf, s.micBuf
-}
 
 func (r *Recorder) captureLoop(ctx context.Context, chunkCh chan<- AudioChunk) {
 	frames, err := r.svc.Capture.Start(ctx)
@@ -97,71 +32,71 @@ func (r *Recorder) captureLoop(ctx context.Context, chunkCh chan<- AudioChunk) {
 		"source", r.svc.Capture.MicSource(),
 	)
 
-	var state captureState
+	accum := chunk.New(chunk.DefaultConfig())
+	audioGate := gate.Default()
+	var wasSpeech bool
+
 	slog.InfoContext(ctx, "listening")
 
 	for {
 		select {
 		case <-ctx.Done():
-			if state.hasSpeech && len(state.sysBuf) >= audio.MinChunkSecs*audio.FrameBytes {
-				r.emitChunk(ctx, state.sysBuf, state.micBuf, state.chunkStartTime, chunkCh)
+			if out, ok := accum.Flush(); ok {
+				r.emitChunk(ctx, out.SysPCM, out.MicPCM, out.StartTime, audioGate, chunkCh)
 			}
 			return
 		case frame, ok := <-frames:
 			if !ok {
-				if state.hasSpeech && len(state.sysBuf) >= audio.MinChunkSecs*audio.FrameBytes {
-					r.emitChunk(ctx, state.sysBuf, state.micBuf, state.chunkStartTime, chunkCh)
+				if out, ok := accum.Flush(); ok {
+					r.emitChunk(ctx, out.SysPCM, out.MicPCM, out.StartTime, audioGate, chunkCh)
 				}
 				slog.InfoContext(ctx, "audio capture ended")
 				return
 			}
-			r.processFrame(ctx, &state, frame, chunkCh)
+			wasSpeech = r.processFrame(ctx, accum, audioGate, frame, wasSpeech, chunkCh)
 		}
 	}
 }
 
 func (r *Recorder) processFrame(
 	ctx context.Context,
-	state *captureState,
-	frame audio.Frame,
+	accum *chunk.Accumulator,
+	audioGate gate.Config,
+	frame frame.Dual,
+	wasSpeech bool,
 	chunkCh chan<- AudioChunk,
-) {
+) bool {
 	if err := r.lk.Heartbeat(); err != nil {
 		slog.ErrorContext(ctx, "heartbeat failed",
 			"err", err,
 		)
 	}
 
-	state.ingest(frame.Sys, frame.Mic)
+	speech := audioGate.FrameHasSpeech(frame.Sys, frame.Mic)
+	out := accum.Ingest(frame.Sys, frame.Mic, time.Now(), speech.Passes)
 
-	sysRMS := audio.ComputeRMS(frame.Sys)
-	micRMS := audio.ComputeRMS(frame.Mic)
-	secondHasSpeech := sysRMS >= audio.SpeechRMSThreshold || micRMS >= audio.SpeechRMSThreshold
-
-	if secondHasSpeech {
-		if !state.wasSpeech {
+	if speech.Passes {
+		if !wasSpeech {
 			var src []string
-			if sysRMS >= audio.SpeechRMSThreshold {
-				src = append(src, fmt.Sprintf("sys=%.4f", sysRMS))
+			if speech.SysRMS >= audioGate.FrameThreshold {
+				src = append(src, fmt.Sprintf("sys=%.4f", speech.SysRMS))
 			}
-			if micRMS >= audio.SpeechRMSThreshold {
-				src = append(src, fmt.Sprintf("mic=%.4f", micRMS))
+			if speech.MicRMS >= audioGate.FrameThreshold {
+				src = append(src, fmt.Sprintf("mic=%.4f", speech.MicRMS))
 			}
 			slog.InfoContext(ctx, "speech detected",
 				"sources", strings.Join(src, ", "),
 			)
-			state.wasSpeech = true
+			wasSpeech = true
 		}
-		state.recordSpeech()
 		r.silenceMonitor.Reset()
 	} else {
-		if state.wasSpeech && state.consecutiveSilentSecs == 1 {
+		if wasSpeech && out.ConsecutiveSilentSecs == 1 {
 			slog.InfoContext(ctx, "silence")
-			state.wasSpeech = false
+			wasSpeech = false
 		}
-		state.recordSilence()
-		if r.silenceMonitor.Tick(state.consecutiveSilentSecs) {
-			mins := state.consecutiveSilentSecs / 60
+		if r.silenceMonitor.Tick(out.ConsecutiveSilentSecs) {
+			mins := out.ConsecutiveSilentSecs / 60
 			e := transcript.Event{
 				Time: time.Now(),
 				Type: transcript.Idle,
@@ -169,37 +104,36 @@ func (r *Recorder) processFrame(
 			}
 			r.appendEvent(ctx, e)
 		}
-		r.segmenter.OnSilence(state.consecutiveSilentSecs)
+		r.segmenter.OnSilence(out.ConsecutiveSilentSecs)
 	}
 
-	switch state.action() {
-	case actionDiscard:
-		state.reset()
-	case actionEmit:
-		sys, mic := state.trimmedPCM()
-		r.emitChunk(ctx, sys, mic, state.chunkStartTime, chunkCh)
-		state.reset()
+	switch out.Action {
+	case chunk.ActionDiscard:
+		// buffer cleared by accumulator
+	case chunk.ActionEmit:
+		r.emitChunk(ctx, out.SysPCM, out.MicPCM, out.StartTime, audioGate, chunkCh)
 	}
+	return wasSpeech
 }
 
 func (r *Recorder) emitChunk(
 	ctx context.Context,
 	sysPCM, micPCM []byte,
 	startTime time.Time,
+	audioGate gate.Config,
 	chunkCh chan<- AudioChunk,
 ) {
 	r.chunkNum++
 	endTime := time.Now()
-	duration := len(sysPCM) / audio.FrameBytes
-	sysRMS := audio.ComputeRMS(sysPCM)
-	micRMS := audio.ComputeRMS(micPCM)
+	duration := pcm.FrameCount(sysPCM, pcm.FrameBytes)
+	filter := audioGate.ChunkPasses(sysPCM, micPCM)
 
-	if sysRMS < audio.ChunkRMSThreshold && micRMS < audio.ChunkRMSThreshold {
+	if !filter.Passes {
 		slog.InfoContext(ctx, "chunk skipped",
 			"chunkNum", r.chunkNum,
 			"durationSec", duration,
-			"sysRms", sysRMS,
-			"micRms", micRMS,
+			"sysRms", filter.SysRMS,
+			"micRms", filter.MicRMS,
 			"reason", "below threshold",
 		)
 		return
@@ -208,13 +142,13 @@ func (r *Recorder) emitChunk(
 	slog.InfoContext(ctx, "chunk emitted",
 		"chunkNum", r.chunkNum,
 		"durationSec", duration,
-		"sysRms", sysRMS,
-		"micRms", micRMS,
+		"sysRms", filter.SysRMS,
+		"micRms", filter.MicRMS,
 	)
 
 	chunkCh <- AudioChunk{
-		SysWAV:    audio.MakeWAV(sysPCM, audio.SampleRate),
-		MicWAV:    audio.MakeWAV(micPCM, audio.SampleRate),
+		SysWAV:    wav.MakeWAV(sysPCM, pcm.SampleRate),
+		MicWAV:    wav.MakeWAV(micPCM, pcm.SampleRate),
 		StartTime: startTime,
 		EndTime:   endTime,
 	}

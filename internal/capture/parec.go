@@ -1,4 +1,4 @@
-package audio
+package capture
 
 import (
 	"context"
@@ -7,34 +7,36 @@ import (
 	"io"
 	"sync"
 
+	"github.com/odsod/recorder/internal/audio/frame"
+	"github.com/odsod/recorder/internal/audio/pcm"
 	"github.com/odsod/recorder/internal/protocol/parec"
 )
 
-// ParecCapture implements Capture using PulseAudio's parec command.
-type ParecCapture struct {
+// Parec implements Source using PulseAudio's parec command.
+type Parec struct {
 	client  *parec.Client
 	monitor string
 	mic     string
 	stop    func()
 }
 
-// NewParecCapture creates a ParecCapture using the given parec protocol client.
-func NewParecCapture(client *parec.Client) *ParecCapture {
-	return &ParecCapture{client: client}
+// NewParec creates a Parec source using the given parec protocol client.
+func NewParec(client *parec.Client) *Parec {
+	return &Parec{client: client}
 }
 
 // MonitorSource returns the system audio monitor source name.
-func (c *ParecCapture) MonitorSource() string {
+func (c *Parec) MonitorSource() string {
 	return c.monitor
 }
 
 // MicSource returns the microphone source name.
-func (c *ParecCapture) MicSource() string {
+func (c *Parec) MicSource() string {
 	return c.mic
 }
 
 // Start begins capturing system and microphone audio, returning a channel of frames.
-func (c *ParecCapture) Start(ctx context.Context) (<-chan Frame, error) {
+func (c *Parec) Start(ctx context.Context) (<-chan frame.Dual, error) {
 	sinkResp, err := c.client.GetDefaultSink(ctx, parec.GetDefaultSinkRequest{})
 	if err != nil {
 		return nil, err
@@ -47,20 +49,20 @@ func (c *ParecCapture) Start(ctx context.Context) (<-chan Frame, error) {
 	c.mic = sourceResp.Source
 
 	sysStream, err := c.client.StartCapture(ctx, parec.StartCaptureRequest{
-		Device: c.monitor, SampleRate: SampleRate,
+		Device: c.monitor, SampleRate: pcm.SampleRate,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("start sys parec: %w", err)
 	}
 	micStream, err := c.client.StartCapture(ctx, parec.StartCaptureRequest{
-		Device: c.mic, SampleRate: SampleRate,
+		Device: c.mic, SampleRate: pcm.SampleRate,
 	})
 	if err != nil {
 		_ = sysStream.Close()
 		return nil, fmt.Errorf("start mic parec: %w", err)
 	}
 
-	frames := make(chan Frame, 2)
+	frames := make(chan frame.Dual, 2)
 	done := make(chan struct{})
 	var once sync.Once
 	c.stop = func() {
@@ -83,21 +85,21 @@ func (c *ParecCapture) Start(ctx context.Context) (<-chan Frame, error) {
 			default:
 			}
 
-			sysData, err := ReadFrame(sysStream)
+			sysData, err := frame.Read(sysStream, pcm.FrameBytes)
 			if err != nil {
 				if !errors.Is(err, io.EOF) {
 					return
 				}
 				return
 			}
-			micData, err := ReadFrame(micStream)
+			micData, err := frame.Read(micStream, pcm.FrameBytes)
 			if err != nil {
-				micData = SilentFrame()
+				micData = frame.Silent(pcm.FrameBytes)
 			}
 
-			frame := Frame{Sys: sysData, Mic: micData}
+			f := frame.Dual{Sys: sysData, Mic: micData}
 			select {
-			case frames <- frame:
+			case frames <- f:
 			case <-ctx.Done():
 				return
 			case <-done:
@@ -110,7 +112,7 @@ func (c *ParecCapture) Start(ctx context.Context) (<-chan Frame, error) {
 }
 
 // Stop terminates the capture processes.
-func (c *ParecCapture) Stop() error {
+func (c *Parec) Stop() error {
 	if c.stop != nil {
 		c.stop()
 	}

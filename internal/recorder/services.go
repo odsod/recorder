@@ -3,7 +3,7 @@ package recorder
 import (
 	"context"
 
-	"github.com/odsod/recorder/internal/audio"
+	"github.com/odsod/recorder/internal/capture"
 	"github.com/odsod/recorder/internal/protocol/whisper"
 	"github.com/odsod/recorder/internal/segment"
 	"github.com/odsod/recorder/internal/signals"
@@ -34,6 +34,6 @@ type Services struct {
 	Cleaner         TextCleaner
 	Summarizer      SegmentSummarizer
 	SpeakerDetector signals.SpeakerPoller
-	Capture         audio.Capture
+	Capture         capture.Source
 	SegmentHandler  segment.Handler
 }
