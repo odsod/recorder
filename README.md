@@ -36,7 +36,7 @@ structured summaries via a local LLM.
 ## Installation
 
 ```bash
-go build -o ~/.local/bin/recorder ./cmd/recorder
+go build -o ~/.local/bin/recorder .
 ```
 
 ## Configuration
