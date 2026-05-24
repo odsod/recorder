@@ -2,42 +2,48 @@ package speaker
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"regexp"
-	"strings"
 
+	"github.com/odsod/recorder/internal/conference"
 	"github.com/odsod/recorder/internal/protocol/cdp"
 	"github.com/odsod/recorder/internal/signals"
 )
 
-var validCSSClass = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
-
+// TabLister lists debuggable browser tabs from Chrome DevTools Protocol.
 type TabLister interface {
 	ListTabs(ctx context.Context, req cdp.ListTabsRequest) (cdp.ListTabsResponse, error)
 }
 
+// Evaluator executes JavaScript expressions in browser tabs via CDP.
 type Evaluator interface {
 	Evaluate(ctx context.Context, req cdp.EvaluateRequest) (cdp.EvaluateResponse, error)
 }
 
+// Detector polls conferencing tabs for participant speaking state.
+// It implements a two-phase detection strategy: first discovering which CSS
+// class indicates speaking state via snapshot diffing, then using that class
+// for efficient cached polling.
 type Detector struct {
 	tabs           TabLister
 	evaluator      Evaluator
 	ports          []int
+	providers      []conference.Provider
 	activeWSURL    string
 	activeTitle    string
-	activePlatform *PlatformConfig
+	activeProvider conference.Provider
 	speakingClass  string
 	prevSnapshot   map[string]map[string]struct{}
 }
 
-func NewDetector(tabs TabLister, evaluator Evaluator, ports []int) *Detector {
-	return &Detector{tabs: tabs, evaluator: evaluator, ports: ports}
+// NewDetector creates a speaker detector that polls the given CDP ports using
+// the provided conference providers to identify meeting tabs.
+func NewDetector(tabs TabLister, evaluator Evaluator, ports []int, providers []conference.Provider) *Detector {
+	return &Detector{tabs: tabs, evaluator: evaluator, ports: ports, providers: providers}
 }
 
+// Poll checks for active meeting tabs and returns current participant speaking
+// state and any meeting changes.
 func (d *Detector) Poll(ctx context.Context) (signals.PollResult, error) {
-	wsURL, tab, platform, err := d.findMeetingTab(ctx)
+	wsURL, tab, provider, err := d.findMeetingTab(ctx)
 	if err != nil {
 		return signals.PollResult{}, err
 	}
@@ -56,7 +62,7 @@ func (d *Detector) Poll(ctx context.Context) (signals.PollResult, error) {
 		}
 		d.activeWSURL = wsURL
 		d.activeTitle = ""
-		d.activePlatform = platform
+		d.activeProvider = provider
 		d.speakingClass = ""
 		d.prevSnapshot = nil
 	}
@@ -72,15 +78,15 @@ func (d *Detector) Poll(ctx context.Context) (signals.PollResult, error) {
 
 	var participants []signals.ParticipantState
 	if d.speakingClass != "" {
-		participants, err = d.pollCached(ctx, wsURL, platform)
+		participants, err = d.pollCached(ctx, wsURL)
 	} else {
-		participants, err = d.pollDiscovery(ctx, wsURL, platform)
+		participants, err = d.pollDiscovery(ctx, wsURL)
 	}
 	result.Participants = participants
 	return result, err
 }
 
-func (d *Detector) findMeetingTab(ctx context.Context) (string, cdp.Tab, *PlatformConfig, error) {
+func (d *Detector) findMeetingTab(ctx context.Context) (string, cdp.Tab, conference.Provider, error) {
 	for _, port := range d.ports {
 		resp, err := d.tabs.ListTabs(ctx, cdp.ListTabsRequest{Port: port})
 		if err != nil {
@@ -90,10 +96,10 @@ func (d *Detector) findMeetingTab(ctx context.Context) (string, cdp.Tab, *Platfo
 			if tab.Type != "page" {
 				continue
 			}
-			for i := range Platforms {
-				if strings.Contains(tab.URL, Platforms[i].URLPattern) {
+			for _, p := range d.providers {
+				if p.MatchesURL(tab.URL) {
 					if tab.WebSocketDebuggerURL != "" {
-						return tab.WebSocketDebuggerURL, tab, &Platforms[i], nil
+						return tab.WebSocketDebuggerURL, tab, p, nil
 					}
 				}
 			}
@@ -102,16 +108,12 @@ func (d *Detector) findMeetingTab(ctx context.Context) (string, cdp.Tab, *Platfo
 	return "", cdp.Tab{}, nil, nil
 }
 
-func (d *Detector) pollCached(
-	ctx context.Context,
-	wsURL string,
-	platform *PlatformConfig,
-) ([]signals.ParticipantState, error) {
-	if !validCSSClass.MatchString(d.speakingClass) {
+func (d *Detector) pollCached(ctx context.Context, wsURL string) ([]signals.ParticipantState, error) {
+	js, pollErr := d.activeProvider.PollExpression(d.speakingClass)
+	if pollErr != nil {
 		d.speakingClass = ""
-		return nil, nil
+		return nil, nil //nolint:nilerr // intentional: invalid class resets to discovery
 	}
-	js := fmt.Sprintf(platform.PollJSTemplate, d.speakingClass, d.speakingClass)
 	resp, err := d.evaluator.Evaluate(ctx, cdp.EvaluateRequest{
 		WebSocketURL: wsURL, Expression: js,
 	})
@@ -122,28 +124,21 @@ func (d *Detector) pollCached(
 		return nil, nil
 	}
 
-	var data []struct {
-		Name     string `json:"name"`
-		Speaking bool   `json:"speaking"`
-	}
-	if err := json.Unmarshal([]byte(resp.Value), &data); err != nil {
+	participants, err := d.activeProvider.ParsePoll(resp.Value)
+	if err != nil {
 		return nil, err
 	}
 
-	result := make([]signals.ParticipantState, len(data))
-	for i, p := range data {
+	result := make([]signals.ParticipantState, len(participants))
+	for i, p := range participants {
 		result[i] = signals.ParticipantState{Name: p.Name, Speaking: p.Speaking}
 	}
 	return result, nil
 }
 
-func (d *Detector) pollDiscovery(
-	ctx context.Context,
-	wsURL string,
-	platform *PlatformConfig,
-) ([]signals.ParticipantState, error) {
+func (d *Detector) pollDiscovery(ctx context.Context, wsURL string) ([]signals.ParticipantState, error) {
 	resp, err := d.evaluator.Evaluate(ctx, cdp.EvaluateRequest{
-		WebSocketURL: wsURL, Expression: platform.SnapshotJS,
+		WebSocketURL: wsURL, Expression: d.activeProvider.SnapshotExpression(),
 	})
 	if err != nil {
 		return nil, err
@@ -152,23 +147,20 @@ func (d *Detector) pollDiscovery(
 		return nil, nil
 	}
 
-	var data []struct {
-		Name    string   `json:"name"`
-		Classes []string `json:"classes"`
-	}
-	if err := json.Unmarshal([]byte(resp.Value), &data); err != nil {
+	snapshots, err := d.activeProvider.ParseSnapshot(resp.Value)
+	if err != nil {
 		return nil, err
 	}
 
 	current := make(map[string]map[string]struct{})
 	var names []string
-	for _, tile := range data {
+	for _, snap := range snapshots {
 		classSet := make(map[string]struct{})
-		for _, c := range tile.Classes {
+		for _, c := range snap.Classes {
 			classSet[c] = struct{}{}
 		}
-		current[tile.Name] = classSet
-		names = append(names, tile.Name)
+		current[snap.Name] = classSet
+		names = append(names, snap.Name)
 	}
 
 	if d.prevSnapshot != nil {

@@ -5,6 +5,9 @@ import (
 	"time"
 
 	"github.com/odsod/recorder/internal/audio"
+	"github.com/odsod/recorder/internal/conference"
+	"github.com/odsod/recorder/internal/conference/meet"
+	"github.com/odsod/recorder/internal/conference/teams"
 	"github.com/odsod/recorder/internal/config"
 	"github.com/odsod/recorder/internal/httpclient"
 	"github.com/odsod/recorder/internal/protocol/cdp"
@@ -48,10 +51,11 @@ func BuildDeps(cfg config.Config) Deps {
 			URL:     cfg.Whisper.URL,
 			Timeout: time.Duration(cfg.Whisper.TimeoutS) * time.Second,
 		}),
-		Cleaner:         transcribe.NewCleaner(llmClient),
-		Summarizer:      summarize.NewSummarizer(llmClient),
-		SpeakerDetector: speaker.NewDetector(cdpClient, cdpClient, cfg.Signals.CDPPorts),
-		Capture:         audio.NewParecCapture(parec.NewDefault()),
+		Cleaner:    transcribe.NewCleaner(llmClient),
+		Summarizer: summarize.NewSummarizer(llmClient),
+		SpeakerDetector: speaker.NewDetector(cdpClient, cdpClient, cfg.Signals.CDPPorts,
+			[]conference.Provider{meet.New(), teams.New()}),
+		Capture: audio.NewParecCapture(parec.NewDefault()),
 	}
 }
 
