@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/odsod/recorder/internal/audio"
+	"github.com/odsod/recorder/internal/capture"
 	"github.com/odsod/recorder/internal/conference"
 	"github.com/odsod/recorder/internal/conference/meet"
 	"github.com/odsod/recorder/internal/conference/teams"
@@ -26,7 +26,7 @@ type deps struct {
 	cleaner         *transcribe.Cleaner
 	summarizer      *summarize.Summarizer
 	speakerDetector *speaker.Detector
-	capture         audio.Capture
+	capture         capture.Source
 }
 
 func buildDeps(cfg config.Config, httpClient *http.Client) deps {
@@ -50,7 +50,7 @@ func buildDeps(cfg config.Config, httpClient *http.Client) deps {
 		summarizer: summarize.NewSummarizer(llmClient),
 		speakerDetector: speaker.NewDetector(cdpClient, cdpClient, cfg.Signals.CDPPorts,
 			[]conference.Provider{meet.New(), teams.New()}),
-		capture: audio.NewParecCapture(parec.NewDefault()),
+		capture: capture.NewParec(parec.NewDefault()),
 	}
 }
 
