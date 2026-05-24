@@ -14,6 +14,7 @@ import (
 	"github.com/odsod/recorder/internal/transcript"
 )
 
+// App is the top-level application coordinating config, deps, and subcommands.
 type App struct {
 	cfg      config.Config
 	deps     Deps
@@ -21,6 +22,7 @@ type App struct {
 	lockHeld bool
 }
 
+// New creates an App with the given configuration.
 func New(cfg config.Config) *App {
 	return &App{
 		cfg:  cfg,
@@ -29,11 +31,13 @@ func New(cfg config.Config) *App {
 	}
 }
 
+// Close releases the lock and shuts down protocol clients.
 func (a *App) Close() {
 	a.releaseLock()
 	a.deps.Close()
 }
 
+// Run starts the recording daemon.
 func (a *App) Run(ctx context.Context) error {
 	if err := a.lk.Acquire(); err != nil {
 		return err
@@ -48,6 +52,7 @@ func (a *App) Run(ctx context.Context) error {
 	return rec.Run(ctx)
 }
 
+// RunSegment detects boundaries, prints segment info, and optionally writes summaries.
 func (a *App) RunSegment(ctx context.Context, events []transcript.Event, write bool) error {
 	boundaries := segment.DetectBoundaries(events, time.Now())
 	segments := segment.SplitAtBoundaries(events, boundaries)
@@ -71,6 +76,7 @@ func (a *App) RunSegment(ctx context.Context, events []transcript.Event, write b
 	return a.writeSegments(ctx, segments, date)
 }
 
+// PrintBoundaries prints detected segment boundaries to stdout.
 func PrintBoundaries(events []transcript.Event) {
 	boundaries := segment.DetectBoundaries(events, time.Now())
 	for _, b := range boundaries {

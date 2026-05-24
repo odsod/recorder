@@ -5,21 +5,25 @@ import (
 	"time"
 )
 
+// SpeakerChange records a speaker transition at a point in time.
 type SpeakerChange struct {
 	Time time.Time
 	Name string // empty string means silence (no speaker)
 }
 
+// SpeakerTimeline is a time-indexed log of speaker changes with LRU eviction.
 type SpeakerTimeline struct {
 	mu        sync.Mutex
 	changes   []SpeakerChange
 	maxAgeSec float64
 }
 
+// NewSpeakerTimeline creates a timeline that evicts entries older than maxAgeSecs.
 func NewSpeakerTimeline(maxAgeSecs int) *SpeakerTimeline {
 	return &SpeakerTimeline{maxAgeSec: float64(maxAgeSecs)}
 }
 
+// Append records a speaker change at the given timestamp.
 func (t *SpeakerTimeline) Append(ts time.Time, name string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -27,6 +31,7 @@ func (t *SpeakerTimeline) Append(ts time.Time, name string) {
 	t.evict()
 }
 
+// SpeakersIn returns speakers active during [start, end], ordered by first appearance.
 func (t *SpeakerTimeline) SpeakersIn(start, end time.Time) []string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -86,15 +91,18 @@ func (t *SpeakerTimeline) evict() {
 	}
 }
 
+// ParticipantSet tracks unique participant names with change detection.
 type ParticipantSet struct {
 	mu    sync.Mutex
 	names map[string]struct{}
 }
 
+// NewParticipantSet creates an empty participant set.
 func NewParticipantSet() *ParticipantSet {
 	return &ParticipantSet{names: make(map[string]struct{})}
 }
 
+// Update adds names to the set and returns only newly seen names.
 func (p *ParticipantSet) Update(names map[string]struct{}) map[string]struct{} {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -112,6 +120,7 @@ func (p *ParticipantSet) Update(names map[string]struct{}) map[string]struct{} {
 	return newNames
 }
 
+// GetAll returns a copy of all known participant names.
 func (p *ParticipantSet) GetAll() map[string]struct{} {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -123,6 +132,7 @@ func (p *ParticipantSet) GetAll() map[string]struct{} {
 	return result
 }
 
+// Reset clears all tracked participants.
 func (p *ParticipantSet) Reset() {
 	p.mu.Lock()
 	defer p.mu.Unlock()

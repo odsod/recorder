@@ -11,6 +11,7 @@ import (
 	"github.com/odsod/recorder/internal/transcript"
 )
 
+// Segment boundary tuning constants.
 const (
 	SilenceThreshold = 300 // 5 min gap between speech → boundary
 	PinLookback      = 90  // seconds to search backwards for snap target
@@ -24,11 +25,13 @@ var bareMeetingTitles = map[string]bool{
 	"meet.google.com_/": true,
 }
 
+// Boundary marks a segment split point with a human-readable reason.
 type Boundary struct {
 	Time   time.Time
 	Reason string
 }
 
+// Segment is a contiguous slice of transcript events between boundaries.
 type Segment struct {
 	Start  time.Time
 	End    time.Time
@@ -36,6 +39,7 @@ type Segment struct {
 	ID     string
 }
 
+// SnapPin moves a pin boundary to the nearest preceding speech gap.
 func SnapPin(pinTime time.Time, speechEvents []transcript.Event) time.Time {
 	var before []transcript.Event
 	for _, e := range speechEvents {
@@ -62,6 +66,7 @@ func SnapPin(pinTime time.Time, speechEvents []transcript.Event) time.Time {
 	return pinTime
 }
 
+// DetectBoundaries finds segment split points from silence, meetings, and pins.
 func DetectBoundaries(events []transcript.Event, now time.Time) []Boundary {
 	var boundaries []Boundary
 
@@ -121,6 +126,7 @@ func DetectBoundaries(events []transcript.Event, now time.Time) []Boundary {
 	return Dedupe(boundaries)
 }
 
+// Dedupe merges boundaries that fall within DedupWindow of each other.
 func Dedupe(boundaries []Boundary) []Boundary {
 	if len(boundaries) == 0 {
 		return nil
@@ -134,6 +140,7 @@ func Dedupe(boundaries []Boundary) []Boundary {
 	return result
 }
 
+// SplitAtBoundaries partitions events into segments at the given boundaries.
 func SplitAtBoundaries(events []transcript.Event, boundaries []Boundary) []Segment {
 	if len(events) == 0 {
 		return nil
@@ -218,6 +225,7 @@ var (
 	slugSpaceRe = regexp.MustCompile(`[\s]+`)
 )
 
+// Slugify converts a title into a filesystem-safe slug.
 func Slugify(title string) string {
 	s := strings.ToLower(strings.TrimSpace(title))
 	s = slugRe.ReplaceAllString(s, "")

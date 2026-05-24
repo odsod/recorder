@@ -11,27 +11,32 @@ import (
 
 const summarizeTimeout = 3 * time.Minute
 
-type SegmentHandler interface {
+// Handler summarizes and writes completed segments.
+type Handler interface {
 	Summarize(ctx context.Context, seg Segment, date string) (title string, summary string, skip bool, err error)
 	WriteSegment(title, summary string, seg Segment, date string) (string, error)
 }
 
+// FuncHandler adapts function values to Handler.
 type FuncHandler struct {
 	SummarizeFn    func(ctx context.Context, seg Segment, date string) (string, string, bool, error)
 	WriteSegmentFn func(title, summary string, seg Segment, date string) (string, error)
 }
 
+// Summarize delegates to SummarizeFn.
 func (h *FuncHandler) Summarize(ctx context.Context, seg Segment, date string) (string, string, bool, error) {
 	return h.SummarizeFn(ctx, seg, date)
 }
 
+// WriteSegment delegates to WriteSegmentFn.
 func (h *FuncHandler) WriteSegment(title, summary string, seg Segment, date string) (string, error) {
 	return h.WriteSegmentFn(title, summary, seg, date)
 }
 
+// IncrementalSegmenter detects boundaries online and triggers summarization.
 type IncrementalSegmenter struct {
 	ctx       context.Context
-	handler   SegmentHandler
+	handler   Handler
 	log       func(string)
 	appendSeg func(transcript.Event)
 
@@ -42,9 +47,10 @@ type IncrementalSegmenter struct {
 	wg           sync.WaitGroup
 }
 
+// NewSegmenter creates an online segmenter with the given handler and callbacks.
 func NewSegmenter(
 	ctx context.Context,
-	handler SegmentHandler,
+	handler Handler,
 	log func(string),
 	appendSeg func(transcript.Event),
 ) *IncrementalSegmenter {
@@ -56,6 +62,7 @@ func NewSegmenter(
 	}
 }
 
+// OnSpeech records speech and finalizes a pending boundary when speech resumes.
 func (s *IncrementalSegmenter) OnSpeech(e transcript.Event) {
 	s.events = append(s.events, e)
 	s.speechEvents = append(s.speechEvents, e)
@@ -66,10 +73,12 @@ func (s *IncrementalSegmenter) OnSpeech(e transcript.Event) {
 	s.lastSpeech = e.Time
 }
 
+// OnEvent records a non-speech transcript event.
 func (s *IncrementalSegmenter) OnEvent(e transcript.Event) {
 	s.events = append(s.events, e)
 }
 
+// OnSilence detects a boundary when silence crosses SilenceThreshold.
 func (s *IncrementalSegmenter) OnSilence(durationSecs int) {
 	if durationSecs >= SilenceThreshold && s.pending == nil {
 		if !s.lastSpeech.IsZero() {
@@ -82,6 +91,7 @@ func (s *IncrementalSegmenter) OnSilence(durationSecs int) {
 	}
 }
 
+// OnMeetingChange detects a boundary when the active meeting tab changes.
 func (s *IncrementalSegmenter) OnMeetingChange(newTitle string, t time.Time) {
 	if !s.lastSpeech.IsZero() && len(s.events) > 0 && s.pending == nil {
 		s.pending = &Boundary{
@@ -92,12 +102,14 @@ func (s *IncrementalSegmenter) OnMeetingChange(newTitle string, t time.Time) {
 	}
 }
 
+// OnPin records a user-placed segment boundary hint.
 func (s *IncrementalSegmenter) OnPin(t time.Time) {
 	snapped := SnapPin(t, s.speechEvents)
 	s.pending = &Boundary{Time: snapped, Reason: "pin"}
 	s.log("segmenter: boundary detected (pin)")
 }
 
+// Flush finalizes any pending segment and waits for summarization goroutines.
 func (s *IncrementalSegmenter) Flush(_ context.Context) {
 	s.ctx = context.WithoutCancel(s.ctx)
 	if s.pending != nil && len(s.speechEvents) > 0 {

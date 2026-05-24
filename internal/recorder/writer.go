@@ -9,16 +9,19 @@ import (
 	"github.com/odsod/recorder/internal/transcript"
 )
 
+// TranscriptWriter appends events to the daily transcript file.
 type TranscriptWriter struct {
 	outputDir string
 	path      string
 	date      string
 }
 
+// NewTranscriptWriter creates a writer targeting the given output directory.
 func NewTranscriptWriter(outputDir string) *TranscriptWriter {
 	return &TranscriptWriter{outputDir: outputDir}
 }
 
+// Path returns the current day's transcript file path, creating it if needed.
 func (w *TranscriptWriter) Path() string {
 	today := time.Now().Format("2006-01-02")
 	if w.date != today {
@@ -31,6 +34,7 @@ func (w *TranscriptWriter) Path() string {
 	return w.path
 }
 
+// AppendEvent writes a formatted event line to the transcript file.
 func (w *TranscriptWriter) AppendEvent(e transcript.Event) {
 	w.appendLine(e.String())
 }

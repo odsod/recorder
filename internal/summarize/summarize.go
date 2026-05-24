@@ -22,18 +22,22 @@ const (
 
 var jsonExtractRe = regexp.MustCompile(`\{[\s\S]*\}`)
 
+// ChatCompleter calls the LLM chat completion endpoint.
 type ChatCompleter interface {
 	Complete(ctx context.Context, req llm.CompleteRequest) (llm.CompleteResponse, error)
 }
 
+// Summarizer produces structured markdown summaries of transcript segments.
 type Summarizer struct {
 	chat ChatCompleter
 }
 
+// NewSummarizer creates a Summarizer using the given LLM client.
 func NewSummarizer(chat ChatCompleter) *Summarizer {
 	return &Summarizer{chat: chat}
 }
 
+// SummarizeSegment produces a title and markdown summary for a transcript segment.
 func (s *Summarizer) SummarizeSegment(
 	ctx context.Context,
 	seg segment.Segment,
@@ -184,6 +188,7 @@ func findBestSplit(lines []string, start, end int) int {
 	return bestIdx
 }
 
+// ExtractParticipants returns sorted unique participant names from a segment's events.
 func ExtractParticipants(seg segment.Segment) []string {
 	names := make(map[string]struct{})
 	for _, e := range seg.Events {

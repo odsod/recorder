@@ -6,34 +6,41 @@ import (
 	"path/filepath"
 )
 
+// WhisperConfig holds whisper-server connection settings.
 type WhisperConfig struct {
 	URL      string `json:"url"`
 	TimeoutS int    `json:"timeoutS"`
 }
 
+// LLMConfig holds LLM server connection settings.
 type LLMConfig struct {
 	URL      string `json:"url"`
 	Model    string `json:"model"`
 	TimeoutS int    `json:"timeoutS"`
 }
 
+// TranscriptConfig holds transcript output settings.
 type TranscriptConfig struct {
 	OutputDir string `json:"outputDir"`
 }
 
+// SegmentsConfig holds segment file output settings.
 type SegmentsConfig struct {
 	OutputDir string `json:"outputDir"`
 }
 
+// DedupConfig holds audio deduplication settings.
 type DedupConfig struct {
 	Threshold float64 `json:"threshold"`
 }
 
+// SignalsConfig holds signal detection settings.
 type SignalsConfig struct {
 	SilenceThresholdS int   `json:"silenceThresholdS"`
 	CDPPorts          []int `json:"cdpPorts"`
 }
 
+// Config is the top-level application configuration.
 type Config struct {
 	Whisper    WhisperConfig    `json:"whisper"`
 	LLM        LLMConfig        `json:"llm"`
@@ -70,10 +77,11 @@ func defaults() Config {
 	}
 }
 
+// Load reads config from $XDG_CONFIG_HOME/recorder/config.json, falling back to defaults.
 func Load() (Config, error) {
 	cfg := defaults()
 
-	configPath := filepath.Join(ConfigDir(), "recorder", "config.json")
+	configPath := filepath.Join(Dir(), "recorder", "config.json")
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -99,15 +107,18 @@ func expandHome(path string) string {
 	return path
 }
 
+// HomeDir returns the user's home directory.
 func HomeDir() string {
 	home, _ := os.UserHomeDir()
 	return home
 }
 
-func ConfigDir() string {
+// Dir returns the XDG config directory.
+func Dir() string {
 	return envDir("XDG_CONFIG_HOME", filepath.Join(HomeDir(), ".config"))
 }
 
+// DataDir returns the XDG data directory.
 func DataDir() string {
 	return envDir("XDG_DATA_HOME", filepath.Join(HomeDir(), ".local", "share"))
 }

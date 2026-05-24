@@ -28,10 +28,12 @@ type CommandRunner interface {
 // ExecRunner is the default CommandRunner using os/exec.
 type ExecRunner struct{}
 
+// Output runs a command and returns its stdout.
 func (ExecRunner) Output(ctx context.Context, name string, args ...string) ([]byte, error) {
 	return exec.CommandContext(ctx, name, args...).Output()
 }
 
+// Start runs a command and returns a handle to its stdout stream.
 func (ExecRunner) Start(ctx context.Context, name string, args ...string) (io.ReadCloser, func() error, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Stderr = io.Discard

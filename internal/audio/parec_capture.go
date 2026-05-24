@@ -10,6 +10,7 @@ import (
 	"github.com/odsod/recorder/internal/protocol/parec"
 )
 
+// ParecCapture implements Capture using PulseAudio's parec command.
 type ParecCapture struct {
 	client  *parec.Client
 	monitor string
@@ -17,18 +18,22 @@ type ParecCapture struct {
 	stop    func()
 }
 
+// NewParecCapture creates a ParecCapture using the given parec protocol client.
 func NewParecCapture(client *parec.Client) *ParecCapture {
 	return &ParecCapture{client: client}
 }
 
+// MonitorSource returns the system audio monitor source name.
 func (c *ParecCapture) MonitorSource() string {
 	return c.monitor
 }
 
+// MicSource returns the microphone source name.
 func (c *ParecCapture) MicSource() string {
 	return c.mic
 }
 
+// Start begins capturing system and microphone audio, returning a channel of frames.
 func (c *ParecCapture) Start(ctx context.Context) (<-chan Frame, error) {
 	sinkResp, err := c.client.GetDefaultSink(ctx, parec.GetDefaultSinkRequest{})
 	if err != nil {
@@ -104,6 +109,7 @@ func (c *ParecCapture) Start(ctx context.Context) (<-chan Frame, error) {
 	return frames, nil
 }
 
+// Stop terminates the capture processes.
 func (c *ParecCapture) Stop() error {
 	if c.stop != nil {
 		c.stop()

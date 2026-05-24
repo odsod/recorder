@@ -7,12 +7,14 @@ import (
 	"time"
 )
 
+// Transcript is a parsed daily event log.
 type Transcript struct {
 	Events []Event
 }
 
 var lineRe = regexp.MustCompile(`^\[(\d{2}:\d{2}:\d{2})\] (.+?) \*\*(\w+)\*\*(.*)$`)
 
+// Parse reads transcript markdown lines into structured events.
 func Parse(data []byte) (Transcript, error) {
 	var events []Event
 	scanner := bufio.NewScanner(strings.NewReader(string(data)))

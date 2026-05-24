@@ -6,6 +6,7 @@ import (
 	"time"
 )
 
+// New returns an HTTP client with conservative timeouts for local services.
 func New() *http.Client {
 	return &http.Client{
 		Transport: &http.Transport{
@@ -18,6 +19,7 @@ func New() *http.Client {
 	}
 }
 
+// Close shuts down idle connections on the client's transport.
 func Close(c *http.Client) {
 	if c == nil {
 		return

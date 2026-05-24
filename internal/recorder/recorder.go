@@ -19,6 +19,7 @@ const (
 	audioChunkBufferSize      = 8
 )
 
+// Recorder orchestrates audio capture, transcription, and segmentation.
 type Recorder struct {
 	cfg             config.Config
 	svc             Services
@@ -35,6 +36,7 @@ type Recorder struct {
 	lastPplSet      map[string]struct{}
 }
 
+// New creates a Recorder with the given config, lock, and services.
 func New(ctx context.Context, cfg config.Config, lk *lock.RecorderLock, svc Services) (*Recorder, error) {
 	t := NewTranscriptWriter(cfg.Transcript.OutputDir)
 
@@ -57,6 +59,7 @@ func New(ctx context.Context, cfg config.Config, lk *lock.RecorderLock, svc Serv
 	return r, nil
 }
 
+// Run starts capture, transcription, and speaker detection until ctx is cancelled.
 func (r *Recorder) Run(ctx context.Context) error {
 	r.log("transcript: " + r.transcript.Path())
 	r.log("whisper: " + r.cfg.Whisper.URL)

@@ -10,6 +10,7 @@ import (
 	"github.com/odsod/recorder/internal/segment"
 )
 
+// WriteSegmentFile writes a segment's summary and transcript to a markdown file.
 func WriteSegmentFile(title, summary string, seg segment.Segment, date, outputDir string) (string, error) {
 	durationMin := int(seg.End.Sub(seg.Start).Seconds() / 60)
 	timeRange := fmt.Sprintf("%s–%s", seg.Start.Format("15:04"), seg.End.Format("15:04"))
