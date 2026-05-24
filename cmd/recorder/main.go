@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -15,6 +17,11 @@ import (
 )
 
 func main() {
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level:       slog.LevelInfo,
+		ReplaceAttr: replaceConsoleAttr,
+	})))
+
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "usage: recorder <run|note|segment>\n")
 		os.Exit(1)
@@ -23,23 +30,46 @@ func main() {
 	switch os.Args[1] {
 	case "run":
 		if err := runRecorder(); err != nil {
-			fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
+			slog.ErrorContext(context.Background(), "run failed",
+				"err", err,
+			)
 			os.Exit(1)
 		}
 	case "note":
-		if err := note.Run(os.Args[2:]); err != nil {
-			fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
+		if err := runNote(); err != nil {
+			slog.ErrorContext(context.Background(), "note failed",
+				"err", err,
+			)
 			os.Exit(1)
 		}
 	case "segment":
 		if err := runSegment(); err != nil {
-			fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
+			slog.ErrorContext(context.Background(), "segment failed",
+				"err", err,
+			)
 			os.Exit(1)
 		}
 	default:
-		fmt.Fprintf(os.Stderr, "recorder: unknown command %q\n", os.Args[1])
+		slog.ErrorContext(context.Background(), "unknown command",
+			"command", os.Args[1],
+		)
 		os.Exit(1)
 	}
+}
+
+func runNote() error {
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	closeLog, err := configureLogger(cfg, os.Stderr)
+	if err != nil {
+		return fmt.Errorf("configure logger: %w", err)
+	}
+	defer closeLog()
+
+	return note.Run(os.Args[2:])
 }
 
 func runRecorder() error {
@@ -47,6 +77,12 @@ func runRecorder() error {
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
+
+	closeLog, err := configureLogger(cfg, os.Stdout)
+	if err != nil {
+		return fmt.Errorf("configure logger: %w", err)
+	}
+	defer closeLog()
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -94,6 +130,12 @@ func runSegment() error {
 		return err
 	}
 
+	closeLog, err := configureLogger(cfg, os.Stderr)
+	if err != nil {
+		return fmt.Errorf("configure logger: %w", err)
+	}
+	defer closeLog()
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -101,4 +143,57 @@ func runSegment() error {
 	defer a.Close()
 
 	return a.RunSegment(ctx, t.Events, write)
+}
+
+// configureLogger sets the default slog logger. Console output uses a human-readable
+// text handler; when cfg.Log.File is set, a JSONL handler mirrors logs to that file.
+func configureLogger(cfg config.Config, console io.Writer) (func(), error) {
+	handlers := []slog.Handler{slog.NewTextHandler(console, &slog.HandlerOptions{
+		Level:       slog.LevelInfo,
+		ReplaceAttr: replaceConsoleAttr,
+	})}
+
+	var logFile *os.File
+	if cfg.Log.File != "" {
+		if err := os.MkdirAll(filepath.Dir(cfg.Log.File), 0o755); err != nil {
+			return func() {}, fmt.Errorf("log file mkdir: %w", err)
+		}
+		f, err := os.OpenFile(cfg.Log.File, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		if err != nil {
+			return func() {}, fmt.Errorf("log file open: %w", err)
+		}
+		logFile = f
+		handlers = append(handlers, slog.NewJSONHandler(f, &slog.HandlerOptions{
+			Level: slog.LevelInfo,
+		}))
+	}
+
+	var handler slog.Handler
+	if len(handlers) == 1 {
+		handler = handlers[0]
+	} else {
+		handler = slog.NewMultiHandler(handlers...)
+	}
+
+	slog.SetDefault(slog.New(handler))
+
+	closeFn := func() {}
+	if logFile != nil {
+		closeFn = func() { _ = logFile.Close() }
+	}
+	return closeFn, nil
+}
+
+func replaceConsoleAttr(_ []string, a slog.Attr) slog.Attr {
+	switch a.Key {
+	case slog.TimeKey:
+		return slog.String("time", a.Value.Time().Format("15:04:05"))
+	case slog.LevelKey:
+		if a.Value.String() == slog.LevelInfo.String() {
+			return slog.Attr{}
+		}
+		return a
+	default:
+		return a
+	}
 }

@@ -1,7 +1,9 @@
 package recorder
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -42,22 +44,30 @@ func (w *TranscriptWriter) AppendEvent(e transcript.Event) {
 func (w *TranscriptWriter) appendLine(line string) {
 	f, err := os.OpenFile(w.Path(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "transcript open: %v\n", err)
+		slog.ErrorContext(context.Background(), "transcript open failed",
+			"err", err,
+		)
 		return
 	}
 	defer func() { _ = f.Close() }()
 	if _, err := f.WriteString(line + "\n"); err != nil {
-		fmt.Fprintf(os.Stderr, "transcript write: %v\n", err)
+		slog.ErrorContext(context.Background(), "transcript write failed",
+			"err", err,
+		)
 	}
 }
 
 func (w *TranscriptWriter) initFile() {
 	if err := os.MkdirAll(w.outputDir, 0o755); err != nil {
-		fmt.Fprintf(os.Stderr, "transcript mkdir: %v\n", err)
+		slog.ErrorContext(context.Background(), "transcript mkdir failed",
+			"err", err,
+		)
 		return
 	}
 	header := fmt.Sprintf("---\ndate: %s\ntype: recorder-transcript\n---\n\n", w.date)
 	if err := os.WriteFile(w.path, []byte(header), 0o644); err != nil {
-		fmt.Fprintf(os.Stderr, "transcript init: %v\n", err)
+		slog.ErrorContext(context.Background(), "transcript init failed",
+			"err", err,
+		)
 	}
 }

@@ -40,6 +40,12 @@ type SignalsConfig struct {
 	CDPPorts          []int `json:"cdpPorts"`
 }
 
+// LogConfig holds logging settings.
+type LogConfig struct {
+	// File is the path for JSONL log output. Empty disables file logging.
+	File string `json:"file"`
+}
+
 // Config is the top-level application configuration.
 type Config struct {
 	Whisper    WhisperConfig    `json:"whisper"`
@@ -48,6 +54,7 @@ type Config struct {
 	Segments   SegmentsConfig   `json:"segments"`
 	Dedup      DedupConfig      `json:"dedup"`
 	Signals    SignalsConfig    `json:"signals"`
+	Log        LogConfig        `json:"log"`
 }
 
 func defaults() Config {
@@ -96,6 +103,7 @@ func Load() (Config, error) {
 
 	cfg.Transcript.OutputDir = expandHome(cfg.Transcript.OutputDir)
 	cfg.Segments.OutputDir = expandHome(cfg.Segments.OutputDir)
+	cfg.Log.File = expandHome(cfg.Log.File)
 
 	return cfg, nil
 }

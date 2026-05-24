@@ -3,6 +3,7 @@ package segment
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -37,7 +38,6 @@ func (h *FuncHandler) WriteSegment(title, summary string, seg Segment, date stri
 type IncrementalSegmenter struct {
 	ctx       context.Context
 	handler   Handler
-	log       func(string)
 	appendSeg func(transcript.Event)
 
 	events       []transcript.Event
@@ -51,13 +51,11 @@ type IncrementalSegmenter struct {
 func NewSegmenter(
 	ctx context.Context,
 	handler Handler,
-	log func(string),
 	appendSeg func(transcript.Event),
 ) *IncrementalSegmenter {
 	return &IncrementalSegmenter{
 		ctx:       ctx,
 		handler:   handler,
-		log:       log,
 		appendSeg: appendSeg,
 	}
 }
@@ -86,7 +84,11 @@ func (s *IncrementalSegmenter) OnSilence(durationSecs int) {
 				Time:   s.lastSpeech,
 				Reason: fmt.Sprintf("silence %dm", durationSecs/60),
 			}
-			s.log(fmt.Sprintf("segmenter: boundary detected (silence %dm)", durationSecs/60))
+			slog.InfoContext(s.ctx, "boundary detected",
+				"component", "segmenter",
+				"reason", "silence",
+				"durationMin", durationSecs/60,
+			)
 		}
 	}
 }
@@ -98,7 +100,11 @@ func (s *IncrementalSegmenter) OnMeetingChange(newTitle string, t time.Time) {
 			Time:   t,
 			Reason: "meeting change → " + newTitle,
 		}
-		s.log(fmt.Sprintf("segmenter: boundary detected (meeting change → %s)", newTitle))
+		slog.InfoContext(s.ctx, "boundary detected",
+			"component", "segmenter",
+			"reason", "meeting change",
+			"title", newTitle,
+		)
 	}
 }
 
@@ -106,7 +112,10 @@ func (s *IncrementalSegmenter) OnMeetingChange(newTitle string, t time.Time) {
 func (s *IncrementalSegmenter) OnPin(t time.Time) {
 	snapped := SnapPin(t, s.speechEvents)
 	s.pending = &Boundary{Time: snapped, Reason: "pin"}
-	s.log("segmenter: boundary detected (pin)")
+	slog.InfoContext(s.ctx, "boundary detected",
+		"component", "segmenter",
+		"reason", "pin",
+	)
 }
 
 // Flush finalizes any pending segment and waits for summarization goroutines.
@@ -177,7 +186,10 @@ func (s *IncrementalSegmenter) summarizeAndWrite(seg Segment) {
 	date := seg.Start.Format("2006-01-02")
 	title, summary, skip, err := s.handler.Summarize(ctx, seg, date)
 	if err != nil {
-		s.log(fmt.Sprintf("segmenter error: %v", err))
+		slog.ErrorContext(ctx, "segmenter summarize failed",
+			"segmentId", seg.ID,
+			"err", err,
+		)
 		return
 	}
 
@@ -187,13 +199,18 @@ func (s *IncrementalSegmenter) summarizeAndWrite(seg Segment) {
 			Type: transcript.Segment,
 			Text: fmt.Sprintf("| %s skip", seg.ID),
 		})
-		s.log("segmenter: skipped segment " + seg.ID)
+		slog.InfoContext(ctx, "segment skipped",
+			"segmentId", seg.ID,
+		)
 		return
 	}
 
 	filename, err := s.handler.WriteSegment(title, summary, seg, date)
 	if err != nil {
-		s.log(fmt.Sprintf("segmenter error: %v", err))
+		slog.ErrorContext(ctx, "segmenter write failed",
+			"segmentId", seg.ID,
+			"err", err,
+		)
 		return
 	}
 
@@ -203,7 +220,10 @@ func (s *IncrementalSegmenter) summarizeAndWrite(seg Segment) {
 		Type: transcript.Segment,
 		Text: fmt.Sprintf("| %s %s", seg.ID, slug),
 	})
-	s.log("segmenter: wrote " + filename)
+	slog.InfoContext(ctx, "segment written",
+		"segmentId", seg.ID,
+		"filename", filename,
+	)
 }
 
 func filterAfter(events []transcript.Event, t time.Time) []transcript.Event {
