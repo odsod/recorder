@@ -12,6 +12,7 @@ import (
 	"github.com/odsod/recorder/internal/transcript"
 )
 
+// Run appends a user note to today's transcript.
 func Run(args []string) error {
 	cfg, err := config.Load()
 	if err != nil {

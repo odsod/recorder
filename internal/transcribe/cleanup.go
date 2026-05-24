@@ -38,18 +38,22 @@ var hallucinationPrefixes = []string{
 	"there is no", "there's no", "empty",
 }
 
+// ChatCompleter sends chat completion requests to an LLM backend.
 type ChatCompleter interface {
 	Complete(ctx context.Context, req llm.CompleteRequest) (llm.CompleteResponse, error)
 }
 
+// Cleaner post-processes raw ASR text via LLM cleanup.
 type Cleaner struct {
 	chat ChatCompleter
 }
 
+// NewCleaner creates a Cleaner backed by chat.
 func NewCleaner(chat ChatCompleter) *Cleaner {
 	return &Cleaner{chat: chat}
 }
 
+// Cleanup removes fillers, fixes grammar, and filters ASR hallucinations.
 func (c *Cleaner) Cleanup(ctx context.Context, text string) (string, error) {
 	resp, err := c.chat.Complete(ctx, llm.CompleteRequest{
 		Messages: []llm.Message{

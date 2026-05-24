@@ -19,6 +19,7 @@ import (
 	"github.com/odsod/recorder/internal/transcribe"
 )
 
+// Deps holds all constructed dependencies for the application.
 type Deps struct {
 	Config          config.Config
 	HTTP            *http.Client
@@ -30,6 +31,7 @@ type Deps struct {
 	Capture         audio.Capture
 }
 
+// BuildDeps constructs all dependencies from the given configuration.
 func BuildDeps(cfg config.Config) Deps {
 	httpClient := httpclient.New()
 
@@ -59,6 +61,7 @@ func BuildDeps(cfg config.Config) Deps {
 	}
 }
 
+// Close releases resources held by the dependencies.
 func (d Deps) Close() {
 	httpclient.Close(d.HTTP)
 }

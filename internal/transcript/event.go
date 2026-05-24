@@ -6,8 +6,10 @@ import (
 	"time"
 )
 
+// EventType categorizes transcript log entries.
 type EventType int
 
+// Transcript event categories.
 const (
 	Speech EventType = iota
 	Meeting
@@ -19,6 +21,7 @@ const (
 	Note
 )
 
+// Event is a single append-only transcript log entry.
 type Event struct {
 	Time    time.Time
 	Type    EventType
@@ -29,18 +32,22 @@ type Event struct {
 	People  []string // participant names (participants events)
 }
 
+// IsSpeech reports whether the event is a mic or system transcription.
 func (e Event) IsSpeech() bool {
 	return e.Type == Speech
 }
 
+// IsMeeting reports whether the event is a meeting join or end signal.
 func (e Event) IsMeeting() bool {
 	return e.Type == Meeting
 }
 
+// IsPin reports whether the event is a user segment boundary hint.
 func (e Event) IsPin() bool {
 	return e.Type == Pin
 }
 
+// Tag returns the short markdown tag for this event type.
 func (e Event) Tag() string {
 	switch e.Type {
 	case Speech:
@@ -64,6 +71,7 @@ func (e Event) Tag() string {
 	}
 }
 
+// Emoji returns the display emoji for this event type.
 func (e Event) Emoji() string {
 	switch e.Type {
 	case Speech:

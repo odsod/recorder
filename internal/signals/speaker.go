@@ -7,24 +7,29 @@ import (
 	"github.com/odsod/recorder/internal/timeline"
 )
 
+// ParticipantState is a meeting participant and whether they are speaking.
 type ParticipantState struct {
 	Name     string
 	Speaking bool
 }
 
+// MeetingChange signals that the active meeting tab changed.
 type MeetingChange struct {
 	Title string
 }
 
+// PollResult is the outcome of a single speaker-detection poll.
 type PollResult struct {
 	Participants  []ParticipantState
 	MeetingChange *MeetingChange
 }
 
+// SpeakerPoller polls CDP for active speakers and meeting state.
 type SpeakerPoller interface {
 	Poll(ctx context.Context) (PollResult, error)
 }
 
+// RunSpeakerCollector polls CDP and updates speaker and meeting timelines.
 func RunSpeakerCollector(
 	ctx context.Context,
 	detector SpeakerPoller,

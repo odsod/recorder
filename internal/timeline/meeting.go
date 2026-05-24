@@ -5,6 +5,7 @@ import (
 	"time"
 )
 
+// MeetingState tracks the current meeting title with one-shot change notification.
 type MeetingState struct {
 	mu        sync.Mutex
 	current   string
@@ -12,10 +13,12 @@ type MeetingState struct {
 	changedAt time.Time
 }
 
+// NewMeetingState creates an empty meeting state.
 func NewMeetingState() *MeetingState {
 	return &MeetingState{}
 }
 
+// Set updates the meeting title and flags the state as changed.
 func (m *MeetingState) Set(title string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -26,6 +29,7 @@ func (m *MeetingState) Set(title string) {
 	}
 }
 
+// Consume returns the current title and clears the changed flag.
 func (m *MeetingState) Consume() (string, time.Time, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

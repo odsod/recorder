@@ -17,6 +17,7 @@ func normalize(text string) string {
 	return strings.TrimSpace(s)
 }
 
+// TextsOverlap reports whether normalized token overlap meets threshold.
 func TextsOverlap(textA, textB string, threshold float64) bool {
 	a := normalize(textA)
 	b := normalize(textB)

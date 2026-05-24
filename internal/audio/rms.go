@@ -5,6 +5,7 @@ import (
 	"math"
 )
 
+// Audio capture constants.
 const (
 	SampleRate         = 16000
 	FrameBytes         = SampleRate * 2 // 1 second of s16le mono
@@ -14,6 +15,7 @@ const (
 	ChunkMaxSecs       = 45
 )
 
+// ComputeRMS computes the root-mean-square amplitude of 16-bit LE PCM data, normalized to [0,1].
 func ComputeRMS(pcm []byte) float64 {
 	if len(pcm) < 2 {
 		return 0.0

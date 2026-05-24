@@ -2,6 +2,7 @@ package audio
 
 import "encoding/binary"
 
+// MakeWAV wraps raw PCM data in a valid WAV header (mono, 16-bit).
 func MakeWAV(pcm []byte, sampleRate int) []byte {
 	dataSize := len(pcm)
 	header := make([]byte, 44)

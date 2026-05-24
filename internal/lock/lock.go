@@ -20,17 +20,20 @@ type lockInfo struct {
 	Updated  int64  `json:"updated"`
 }
 
+// RecorderLock is a JSON lockfile with heartbeat for single-instance enforcement.
 type RecorderLock struct {
 	path          string
 	lastHeartbeat time.Time
 }
 
+// New creates a lock in lockDir.
 func New(lockDir string) *RecorderLock {
 	return &RecorderLock{
 		path: filepath.Join(lockDir, ".recorder-lock"),
 	}
 }
 
+// Acquire claims the lock or returns an error if another instance holds it.
 func (l *RecorderLock) Acquire() error {
 	existing, err := l.read()
 	if err != nil {
@@ -44,6 +47,7 @@ func (l *RecorderLock) Acquire() error {
 	return l.write()
 }
 
+// Heartbeat refreshes the lock if the heartbeat interval has elapsed.
 func (l *RecorderLock) Heartbeat() error {
 	if time.Since(l.lastHeartbeat) >= heartbeatInterval {
 		return l.write()
@@ -51,6 +55,7 @@ func (l *RecorderLock) Heartbeat() error {
 	return nil
 }
 
+// Release removes the lock file.
 func (l *RecorderLock) Release() {
 	_ = os.Remove(l.path)
 }
