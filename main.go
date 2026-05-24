@@ -10,9 +10,10 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/odsod/recorder/internal/app"
 	"github.com/odsod/recorder/internal/config"
 	"github.com/odsod/recorder/internal/note"
+	"github.com/odsod/recorder/internal/recorder"
+	"github.com/odsod/recorder/internal/segment"
 	"github.com/odsod/recorder/internal/transcript"
 )
 
@@ -69,7 +70,7 @@ func runNote() error {
 	}
 	defer closeLog()
 
-	return note.Run(os.Args[2:])
+	return note.Run(cfg, os.Args[2:])
 }
 
 func runRecorder() error {
@@ -87,10 +88,15 @@ func runRecorder() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	a := app.New(cfg)
-	defer a.Close()
+	httpClient := newHTTPClient()
+	defer closeHTTPClient(httpClient)
 
-	return a.Run(ctx)
+	d := buildDeps(cfg, httpClient)
+	rec, err := recorder.New(ctx, cfg, recorderServices(cfg, d))
+	if err != nil {
+		return err
+	}
+	return rec.Run(ctx)
 }
 
 func runSegment() error {
@@ -121,7 +127,7 @@ func runSegment() error {
 	}
 
 	if boundariesOnly {
-		app.PrintBoundaries(t.Events)
+		segment.PrintBoundaries(t.Events)
 		return nil
 	}
 
@@ -139,10 +145,15 @@ func runSegment() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	a := app.New(cfg)
-	defer a.Close()
+	if !write {
+		return segment.RunBatch(ctx, t.Events, false, nil)
+	}
 
-	return a.RunSegment(ctx, t.Events, write)
+	httpClient := newHTTPClient()
+	defer closeHTTPClient(httpClient)
+
+	d := buildDeps(cfg, httpClient)
+	return segment.RunBatch(ctx, t.Events, true, recorderServices(cfg, d).SegmentHandler)
 }
 
 // configureLogger sets the default slog logger. Console output uses a human-readable
