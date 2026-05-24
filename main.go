@@ -12,6 +12,7 @@ import (
 
 	"github.com/odsod/recorder/internal/config"
 	"github.com/odsod/recorder/internal/note"
+	"github.com/odsod/recorder/internal/prompt"
 	"github.com/odsod/recorder/internal/recorder"
 	"github.com/odsod/recorder/internal/segment"
 	"github.com/odsod/recorder/internal/transcript"
@@ -24,7 +25,7 @@ func main() {
 	})))
 
 	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "usage: recorder <run|note|segment>\n")
+		fmt.Fprintf(os.Stderr, "usage: recorder <run|note|segment|prompts>\n")
 		os.Exit(1)
 	}
 
@@ -50,6 +51,13 @@ func main() {
 			)
 			os.Exit(1)
 		}
+	case "prompts":
+		if err := runPrompts(); err != nil {
+			slog.ErrorContext(context.Background(), "prompts failed",
+				"err", err,
+			)
+			os.Exit(1)
+		}
 	default:
 		slog.ErrorContext(context.Background(), "unknown command",
 			"command", os.Args[1],
@@ -71,6 +79,14 @@ func runNote() error {
 	defer closeLog()
 
 	return note.Run(cfg, os.Args[2:])
+}
+
+func runPrompts() error {
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	return prompt.Run(cfg, os.Args[2:], os.Stdout)
 }
 
 func runRecorder() error {

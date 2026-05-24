@@ -14,4 +14,4 @@ Respond ONLY with valid JSON:
 }
 ```
 
-Title: ≤8 words, subject-first, no stop words ("the", "a", "of", "about").
+Title: ≤{{ .TitleMaxWords }} words, subject-first, no stop words ({{ .TitleStopWordsJoin }}).

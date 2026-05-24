@@ -29,12 +29,14 @@ type ChatCompleter interface {
 
 // Summarizer produces structured markdown summaries of transcript segments.
 type Summarizer struct {
-	chat ChatCompleter
+	chat      ChatCompleter
+	summarize string
+	combine   string
 }
 
 // NewSummarizer creates a Summarizer using the given LLM client.
-func NewSummarizer(chat ChatCompleter) *Summarizer {
-	return &Summarizer{chat: chat}
+func NewSummarizer(chat ChatCompleter, summarize, combine string) *Summarizer {
+	return &Summarizer{chat: chat, summarize: summarize, combine: combine}
 }
 
 // SummarizeSegment produces a title and markdown summary for a transcript segment.
@@ -51,7 +53,7 @@ func (s *Summarizer) SummarizeSegment(
 
 	var response map[string]any
 	if len(transcriptText) <= chunkChars {
-		response, err = s.completeJSON(ctx, summarizePrompt, transcriptText)
+		response, err = s.completeJSON(ctx, s.summarize, transcriptText)
 	} else {
 		response, err = s.summarizeChunked(ctx, transcriptText)
 	}
@@ -79,7 +81,7 @@ func (s *Summarizer) summarizeChunked(ctx context.Context, transcriptText string
 	var chunkSummaries []map[string]any
 
 	for _, chunk := range chunks {
-		result, err := s.completeJSON(ctx, summarizePrompt, chunk)
+		result, err := s.completeJSON(ctx, s.summarize, chunk)
 		if err != nil {
 			continue
 		}
@@ -103,7 +105,7 @@ func (s *Summarizer) summarizeChunked(ctx context.Context, transcriptText string
 		parts = append(parts, string(data))
 	}
 	combinedInput := strings.Join(parts, "\n\n---\n\n")
-	return s.completeJSON(ctx, combinePrompt, combinedInput)
+	return s.completeJSON(ctx, s.combine, combinedInput)
 }
 
 func (s *Summarizer) completeJSON(ctx context.Context, system, user string) (map[string]any, error) {

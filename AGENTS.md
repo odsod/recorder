@@ -54,8 +54,7 @@ recorder/
 │   │   ├── whisper/              # OpenAI audio transcription (HTTP multipart)
 │   │   ├── cdp/                  # Chrome DevTools Protocol (HTTP + WebSocket)
 │   │   └── parec/                # PulseAudio capture (subprocess + streaming)
-│   ├── app/                      # Composition root + CLI wiring
-│   ├── config/                   # Config structs + JSON loading (XDG)
+│   ├── config/                   # config.go, prompts.go, prompt_vars.go, prompts/*.txt (//go:embed)
 │   ├── audio/                    # Capture interface, RMS, WAV encoding
 │   ├── speaker/                  # Speaker detection business logic (uses cdp client)
 │   ├── recorder/                 # Core recording orchestration
@@ -63,7 +62,8 @@ recorder/
 │   ├── transcribe/               # cleanup.go, dedup.go (uses llm client)
 │   ├── transcript/               # daily.go (append-only), parse.go
 │   ├── segment/                  # boundary.go (pure), segmenter.go (state machine)
-│   ├── summarize/                # summarize.go, output.go, prompts.go (//go:embed)
+│   ├── summarize/                # summarize.go, output.go
+│   ├── prompt/                   # prompts subcommand — print resolved system prompts
 │   ├── signals/                  # speaker.go, silence.go (collector goroutines)
 │   ├── lock/lock.go              # JSON lockfile with heartbeat
 │   └── note/note.go              # CLI arg / stdin → transcript append
@@ -86,6 +86,9 @@ recorder note "text"                          # note via CLI argument
 recorder segment <transcript>                 # dry-run: show boundaries + summaries
 recorder segment <transcript> --write         # write segment files + seg markers
 recorder segment <transcript> --boundaries    # only show boundaries, no LLM calls
+recorder prompts                              # print resolved system prompts (debug)
+recorder prompts cleanup                      # print one prompt
+recorder prompts summarize combine            # print a subset
 ```
 
 ## Daemon Controls
@@ -171,9 +174,47 @@ mise run install        # build + install binary to ~/.local/bin
   "signals": {
     "silenceThresholdS": 180,
     "cdpPorts": [9222]
+  },
+  "promptVars": {
+    "languages": ["Swedish", "English"],
+    "fillerWords": ["um", "uh", "liksom", "typ"],
+    "owner": { "role": "software engineer", "summaryFor": "a human inbox" },
+    "includeInSummary": ["Technical decisions, action items, information shared"],
+    "titleMaxWords": 8,
+    "skipMaxGreetLines": 3,
+    "titleStopWords": ["the", "a", "of", "about"],
+    "summaryLabels": ["Decided:", "Insight:", "Problem:", "Context:", "Next:"]
+  },
+  "prompts": {
+    "cleanup": "",
+    "summarize": "~/.config/recorder/prompts/summarize.txt",
+    "combine": ""
   }
 }
 ```
+
+### Prompts
+
+System prompts for LLM cleanup and summarization live in
+[`internal/config/prompts/`](internal/config/prompts/) as Go `text/template`
+files. Defaults are embedded; optional override paths are set under `prompts`.
+
+At `config.Load()`:
+
+1. Merge `promptVars` with built-in defaults (partial overrides supported).
+2. Load template from embed or override file (override files are templates too).
+3. If an override path is set but missing, seed the embedded template (with
+   `{{...}}` placeholders intact).
+4. Render template + vars → resolved text in `cfg.Prompts`.
+
+**Configurable (`promptVars`)**: languages, filler words, owner framing
+(`role`, `summaryFor`), `includeInSummary` bullets, title/skip tuning.
+
+**Static in templates (software contract)**: `mic`/`sys` channel semantics,
+JSON output shape (`title`, `summary`, `skip`), chunked timestamp caveat,
+combine merge logic, cleanup output-format rules.
+
+Debug resolved prompts: `recorder prompts [cleanup|summarize|combine]`.
 
 ## Concurrency Design
 

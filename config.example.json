@@ -23,5 +23,17 @@
   },
   "log": {
     "file": "~/.local/share/recorder/recorder.jsonl"
+  },
+  "promptVars": {
+    "languages": ["Swedish", "English"],
+    "owner": {
+      "role": "software engineer",
+      "summaryFor": "a human inbox"
+    }
+  },
+  "prompts": {
+    "cleanup": "",
+    "summarize": "",
+    "combine": ""
   }
 }

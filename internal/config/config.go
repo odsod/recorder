@@ -48,13 +48,16 @@ type LogConfig struct {
 
 // Config is the top-level application configuration.
 type Config struct {
-	Whisper    WhisperConfig    `json:"whisper"`
-	LLM        LLMConfig        `json:"llm"`
-	Transcript TranscriptConfig `json:"transcript"`
-	Segments   SegmentsConfig   `json:"segments"`
-	Dedup      DedupConfig      `json:"dedup"`
-	Signals    SignalsConfig    `json:"signals"`
-	Log        LogConfig        `json:"log"`
+	Whisper     WhisperConfig     `json:"whisper"`
+	LLM         LLMConfig         `json:"llm"`
+	Transcript  TranscriptConfig  `json:"transcript"`
+	Segments    SegmentsConfig    `json:"segments"`
+	Dedup       DedupConfig       `json:"dedup"`
+	Signals     SignalsConfig     `json:"signals"`
+	Log         LogConfig         `json:"log"`
+	PromptPaths PromptPathsConfig `json:"prompts"`
+	PromptVars  PromptVarsConfig  `json:"promptVars"`
+	Prompts     Prompts           `json:"-"`
 }
 
 func defaults() Config {
@@ -81,6 +84,7 @@ func defaults() Config {
 			SilenceThresholdS: 180,
 			CDPPorts:          []int{},
 		},
+		PromptVars: defaultPromptVars(),
 	}
 }
 
@@ -92,7 +96,7 @@ func Load() (Config, error) {
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return cfg, nil
+			return finalize(cfg)
 		}
 		return cfg, err
 	}
@@ -101,9 +105,23 @@ func Load() (Config, error) {
 		return cfg, err
 	}
 
+	return finalize(cfg)
+}
+
+func finalize(cfg Config) (Config, error) {
 	cfg.Transcript.OutputDir = expandHome(cfg.Transcript.OutputDir)
 	cfg.Segments.OutputDir = expandHome(cfg.Segments.OutputDir)
 	cfg.Log.File = expandHome(cfg.Log.File)
+	cfg.PromptPaths.Cleanup = expandHome(cfg.PromptPaths.Cleanup)
+	cfg.PromptPaths.Summarize = expandHome(cfg.PromptPaths.Summarize)
+	cfg.PromptPaths.Combine = expandHome(cfg.PromptPaths.Combine)
+	cfg.PromptVars = mergePromptVars(cfg.PromptVars, defaultPromptVars())
+
+	prompts, err := resolvePrompts(cfg.PromptPaths, cfg.PromptVars)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.Prompts = prompts
 
 	return cfg, nil
 }
