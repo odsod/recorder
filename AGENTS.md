@@ -49,11 +49,18 @@ Critical invariant: only the transcription goroutine calls `transcript.Append()`
 recorder/
 ├── cmd/recorder/main.go          # Entrypoint, subcommand dispatch
 ├── internal/
-│   ├── config/config.go          # Config structs + JSON loading (XDG)
-│   ├── audio/                    # capture.go (parec), rms.go, wav.go
+│   ├── protocol/                 # Wire-protocol clients (one per external service)
+│   │   ├── llm/                  # OpenAI chat completions (HTTP JSON)
+│   │   ├── whisper/              # OpenAI audio transcription (HTTP multipart)
+│   │   ├── cdp/                  # Chrome DevTools Protocol (HTTP + WebSocket)
+│   │   └── parec/                # PulseAudio capture (subprocess + streaming)
+│   ├── app/                      # Composition root + CLI wiring
+│   ├── config/                   # Config structs + JSON loading (XDG)
+│   ├── audio/                    # Capture interface, RMS, WAV encoding
+│   ├── speaker/                  # Speaker detection business logic (uses cdp client)
+│   ├── recorder/                 # Core recording orchestration
 │   ├── timeline/                 # speaker.go, meeting.go (mutex-guarded state)
-│   ├── cdp/                      # client.go (WebSocket), detector.go, platforms.go
-│   ├── transcribe/               # whisper.go, cleanup.go, dedup.go
+│   ├── transcribe/               # cleanup.go, dedup.go (uses llm client)
 │   ├── transcript/               # daily.go (append-only), parse.go
 │   ├── segment/                  # boundary.go (pure), segmenter.go (state machine)
 │   ├── summarize/                # summarize.go, output.go, prompts.go (//go:embed)
@@ -62,6 +69,11 @@ recorder/
 │   └── note/note.go              # CLI arg / stdin → transcript append
 └── mise.toml
 ```
+
+### Protocol Clients
+
+All protocol clients follow `Client.Method(ctx, MethodRequest) (MethodResponse, error)`.
+They own only wire concerns — business logic (retries, prompt engineering) belongs in consumers.
 
 ## CLI
 
@@ -131,10 +143,16 @@ Chrome: `--remote-debugging-port=<port>` (configure in `signals.cdpPorts`).
 
 ## Development
 
-- **Install**: `mise run install`
-- **Build only**: `go build ./cmd/recorder`
-- **Test**: `mise run test`
-- **Full CI**: `mise run build` (lint → test → tidy → diff)
+**Run `mise run build` before pushing any PR.** It is the CI gate.
+
+```bash
+mise run build          # lint → test → tidy → diff (default gate)
+mise run lint           # golangci-lint --fix
+mise run test           # go test -cover ./...
+mise run tidy           # go mod tidy
+mise run install        # build + install binary to ~/.local/bin
+```
+
 - **Config**: `$XDG_CONFIG_HOME/recorder/config.json` (default `~/.config/recorder/config.json`)
 
 ### Config Sections

@@ -7,6 +7,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/odsod/recorder/internal/protocol/whisper"
 	"github.com/odsod/recorder/internal/transcribe"
 	"github.com/odsod/recorder/internal/transcript"
 )
@@ -21,14 +22,21 @@ func (r *Recorder) transcriptionWorker(ctx context.Context, chunkCh <-chan Audio
 }
 
 func (r *Recorder) transcribeChunk(ctx context.Context, chunk AudioChunk) {
-	sysText, err := r.svc.Transcriber.Transcribe(ctx, chunk.SysWAV, "sys.wav")
+	sysResp, err := r.svc.Transcriber.Transcribe(ctx, whisper.TranscribeRequest{
+		WAVData: chunk.SysWAV, Filename: "sys.wav",
+	})
 	if err != nil {
 		r.log(fmt.Sprintf("transcribe sys: %v", err))
 	}
-	micText, err := r.svc.Transcriber.Transcribe(ctx, chunk.MicWAV, "mic.wav")
+	micResp, err := r.svc.Transcriber.Transcribe(ctx, whisper.TranscribeRequest{
+		WAVData: chunk.MicWAV, Filename: "mic.wav",
+	})
 	if err != nil {
 		r.log(fmt.Sprintf("transcribe mic: %v", err))
 	}
+
+	sysText := sysResp.Text
+	micText := micResp.Text
 
 	r.flushSignalEvents(chunk.StartTime, chunk.EndTime)
 

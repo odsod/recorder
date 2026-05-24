@@ -2,12 +2,16 @@ package app
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/odsod/recorder/internal/audio"
-	"github.com/odsod/recorder/internal/cdp"
 	"github.com/odsod/recorder/internal/config"
 	"github.com/odsod/recorder/internal/httpclient"
-	"github.com/odsod/recorder/internal/llm"
+	"github.com/odsod/recorder/internal/protocol/cdp"
+	"github.com/odsod/recorder/internal/protocol/llm"
+	"github.com/odsod/recorder/internal/protocol/parec"
+	"github.com/odsod/recorder/internal/protocol/whisper"
+	"github.com/odsod/recorder/internal/speaker"
 	"github.com/odsod/recorder/internal/summarize"
 	"github.com/odsod/recorder/internal/transcribe"
 )
@@ -15,30 +19,39 @@ import (
 type Deps struct {
 	Config          config.Config
 	HTTP            *http.Client
-	Whisper         *transcribe.WhisperClient
 	LLM             *llm.Client
+	Whisper         *whisper.Client
 	Cleaner         *transcribe.Cleaner
 	Summarizer      *summarize.Summarizer
-	CDP             *cdp.Client
-	SpeakerDetector *cdp.SpeakerDetector
+	SpeakerDetector *speaker.Detector
 	Capture         audio.Capture
 }
 
 func BuildDeps(cfg config.Config) Deps {
 	httpClient := httpclient.New()
-	llmClient := llm.New(httpClient, cfg.LLM)
-	cdpClient := cdp.NewClient(httpClient)
+
+	llmClient := llm.New(httpClient, llm.Config{
+		URL:         cfg.LLM.URL,
+		Model:       cfg.LLM.Model,
+		Timeout:     time.Duration(cfg.LLM.TimeoutS) * time.Second,
+		Temperature: 0.3,
+		MaxTokens:   4096,
+	})
+
+	cdpClient := cdp.New(httpClient)
 
 	return Deps{
-		Config:          cfg,
-		HTTP:            httpClient,
-		Whisper:         transcribe.NewWhisperClient(httpClient, cfg.Whisper),
-		LLM:             llmClient,
+		Config: cfg,
+		HTTP:   httpClient,
+		LLM:    llmClient,
+		Whisper: whisper.New(httpClient, whisper.Config{
+			URL:     cfg.Whisper.URL,
+			Timeout: time.Duration(cfg.Whisper.TimeoutS) * time.Second,
+		}),
 		Cleaner:         transcribe.NewCleaner(llmClient),
 		Summarizer:      summarize.NewSummarizer(llmClient),
-		CDP:             cdpClient,
-		SpeakerDetector: cdp.NewSpeakerDetector(cdpClient, cfg.Signals.CDPPorts),
-		Capture:         audio.NewParecCapture(),
+		SpeakerDetector: speaker.NewDetector(cdpClient, cdpClient, cfg.Signals.CDPPorts),
+		Capture:         audio.NewParecCapture(parec.NewDefault()),
 	}
 }
 

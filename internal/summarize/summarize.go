@@ -3,12 +3,14 @@ package summarize
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 
-	"github.com/odsod/recorder/internal/llm"
+	"github.com/odsod/recorder/internal/protocol/llm"
 	"github.com/odsod/recorder/internal/segment"
 	"github.com/odsod/recorder/internal/transcript"
 )
@@ -18,12 +20,18 @@ const (
 	maxRetries = 2
 )
 
-type Summarizer struct {
-	llm *llm.Client
+var jsonExtractRe = regexp.MustCompile(`\{[\s\S]*\}`)
+
+type ChatCompleter interface {
+	Complete(ctx context.Context, req llm.CompleteRequest) (llm.CompleteResponse, error)
 }
 
-func NewSummarizer(client *llm.Client) *Summarizer {
-	return &Summarizer{llm: client}
+type Summarizer struct {
+	chat ChatCompleter
+}
+
+func NewSummarizer(chat ChatCompleter) *Summarizer {
+	return &Summarizer{chat: chat}
 }
 
 func (s *Summarizer) SummarizeSegment(
@@ -39,7 +47,7 @@ func (s *Summarizer) SummarizeSegment(
 
 	var response map[string]any
 	if len(transcriptText) <= chunkChars {
-		response, err = s.callLLM(ctx, summarizePrompt, transcriptText)
+		response, err = s.completeJSON(ctx, summarizePrompt, transcriptText)
 	} else {
 		response, err = s.summarizeChunked(ctx, transcriptText)
 	}
@@ -67,7 +75,7 @@ func (s *Summarizer) summarizeChunked(ctx context.Context, transcriptText string
 	var chunkSummaries []map[string]any
 
 	for _, chunk := range chunks {
-		result, err := s.callLLM(ctx, summarizePrompt, chunk)
+		result, err := s.completeJSON(ctx, summarizePrompt, chunk)
 		if err != nil {
 			continue
 		}
@@ -91,11 +99,35 @@ func (s *Summarizer) summarizeChunked(ctx context.Context, transcriptText string
 		parts = append(parts, string(data))
 	}
 	combinedInput := strings.Join(parts, "\n\n---\n\n")
-	return s.callLLM(ctx, combinePrompt, combinedInput)
+	return s.completeJSON(ctx, combinePrompt, combinedInput)
 }
 
-func (s *Summarizer) callLLM(ctx context.Context, system, user string) (map[string]any, error) {
-	return s.llm.CompleteJSONWithRetry(ctx, system, user, maxRetries)
+func (s *Summarizer) completeJSON(ctx context.Context, system, user string) (map[string]any, error) {
+	var lastErr error
+	for range 1 + maxRetries {
+		resp, err := s.chat.Complete(ctx, llm.CompleteRequest{
+			Messages: []llm.Message{
+				{Role: "system", Content: system},
+				{Role: "user", Content: user},
+			},
+		})
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		m := jsonExtractRe.FindString(resp.Content)
+		if m == "" {
+			lastErr = errors.New("no JSON in response")
+			continue
+		}
+		var parsed map[string]any
+		if err := json.Unmarshal([]byte(m), &parsed); err != nil {
+			lastErr = err
+			continue
+		}
+		return parsed, nil
+	}
+	return nil, fmt.Errorf("llm failed after %d attempts: %w", 1+maxRetries, lastErr)
 }
 
 func splitIntoChunks(text string, maxChars int) []string {
@@ -152,7 +184,6 @@ func findBestSplit(lines []string, start, end int) int {
 	return bestIdx
 }
 
-// ExtractParticipants extracts unique participant names from participant events.
 func ExtractParticipants(seg segment.Segment) []string {
 	names := make(map[string]struct{})
 	for _, e := range seg.Events {

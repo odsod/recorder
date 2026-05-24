@@ -6,12 +6,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/odsod/recorder/internal/cdp"
 	"github.com/odsod/recorder/internal/config"
 	"github.com/odsod/recorder/internal/lock"
 	"github.com/odsod/recorder/internal/recorder"
 	"github.com/odsod/recorder/internal/segment"
-	"github.com/odsod/recorder/internal/signals"
 	"github.com/odsod/recorder/internal/summarize"
 	"github.com/odsod/recorder/internal/transcript"
 )
@@ -118,7 +116,7 @@ func (a *App) recorderServices() recorder.Services {
 		Transcriber:     a.deps.Whisper,
 		Cleaner:         a.deps.Cleaner,
 		Summarizer:      a.deps.Summarizer,
-		SpeakerDetector: &speakerPollerAdapter{d: a.deps.SpeakerDetector},
+		SpeakerDetector: a.deps.SpeakerDetector,
 		Capture:         a.deps.Capture,
 		SegmentHandler:  a.segmentHandler(),
 	}
@@ -131,27 +129,4 @@ func (a *App) segmentHandler() *segment.FuncHandler {
 			return summarize.WriteSegmentFile(title, summary, seg, date, a.cfg.Segments.OutputDir)
 		},
 	}
-}
-
-type speakerPollerAdapter struct {
-	d *cdp.SpeakerDetector
-}
-
-func (a *speakerPollerAdapter) Poll(ctx context.Context) (signals.PollResult, error) {
-	result, err := a.d.Poll(ctx)
-	if err != nil {
-		return signals.PollResult{}, err
-	}
-
-	var pr signals.PollResult
-	if result.MeetingChange != nil {
-		pr.MeetingChange = &signals.MeetingChange{Title: result.MeetingChange.Title}
-	}
-	if result.Participants != nil {
-		pr.Participants = make([]signals.ParticipantState, len(result.Participants))
-		for i, p := range result.Participants {
-			pr.Participants[i] = signals.ParticipantState{Name: p.Name, Speaking: p.Speaking}
-		}
-	}
-	return pr, nil
 }

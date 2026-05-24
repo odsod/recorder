@@ -1,4 +1,4 @@
-package cdp
+package speaker
 
 import (
 	"context"
@@ -6,26 +6,24 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/odsod/recorder/internal/protocol/cdp"
+	"github.com/odsod/recorder/internal/signals"
 )
 
 var validCSSClass = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
-type ParticipantState struct {
-	Name     string
-	Speaking bool
+type TabLister interface {
+	ListTabs(ctx context.Context, req cdp.ListTabsRequest) (cdp.ListTabsResponse, error)
 }
 
-type MeetingChange struct {
-	Title string
+type Evaluator interface {
+	Evaluate(ctx context.Context, req cdp.EvaluateRequest) (cdp.EvaluateResponse, error)
 }
 
-type PollResult struct {
-	Participants  []ParticipantState
-	MeetingChange *MeetingChange
-}
-
-type SpeakerDetector struct {
-	client         *Client
+type Detector struct {
+	tabs           TabLister
+	evaluator      Evaluator
 	ports          []int
 	activeWSURL    string
 	activeTitle    string
@@ -34,27 +32,27 @@ type SpeakerDetector struct {
 	prevSnapshot   map[string]map[string]struct{}
 }
 
-func NewSpeakerDetector(client *Client, ports []int) *SpeakerDetector {
-	return &SpeakerDetector{client: client, ports: ports}
+func NewDetector(tabs TabLister, evaluator Evaluator, ports []int) *Detector {
+	return &Detector{tabs: tabs, evaluator: evaluator, ports: ports}
 }
 
-func (d *SpeakerDetector) Poll(ctx context.Context) (PollResult, error) {
+func (d *Detector) Poll(ctx context.Context) (signals.PollResult, error) {
 	wsURL, tab, platform, err := d.findMeetingTab(ctx)
 	if err != nil {
-		return PollResult{}, err
+		return signals.PollResult{}, err
 	}
 
-	var result PollResult
+	var result signals.PollResult
 
 	if wsURL != d.activeWSURL {
 		if wsURL == "" && d.activeWSURL != "" {
-			result.MeetingChange = &MeetingChange{Title: ""}
+			result.MeetingChange = &signals.MeetingChange{Title: ""}
 		} else if wsURL != "" {
 			title := tab.Title
 			if title == "" {
 				title = tab.URL
 			}
-			result.MeetingChange = &MeetingChange{Title: title}
+			result.MeetingChange = &signals.MeetingChange{Title: title}
 		}
 		d.activeWSURL = wsURL
 		d.activeTitle = ""
@@ -68,11 +66,11 @@ func (d *SpeakerDetector) Poll(ctx context.Context) (PollResult, error) {
 	}
 
 	if tab.Title != d.activeTitle && d.activeTitle != "" {
-		result.MeetingChange = &MeetingChange{Title: tab.Title}
+		result.MeetingChange = &signals.MeetingChange{Title: tab.Title}
 	}
 	d.activeTitle = tab.Title
 
-	var participants []ParticipantState
+	var participants []signals.ParticipantState
 	if d.speakingClass != "" {
 		participants, err = d.pollCached(ctx, wsURL, platform)
 	} else {
@@ -82,13 +80,13 @@ func (d *SpeakerDetector) Poll(ctx context.Context) (PollResult, error) {
 	return result, err
 }
 
-func (d *SpeakerDetector) findMeetingTab(ctx context.Context) (string, Tab, *PlatformConfig, error) {
+func (d *Detector) findMeetingTab(ctx context.Context) (string, cdp.Tab, *PlatformConfig, error) {
 	for _, port := range d.ports {
-		tabs, err := d.client.ListTabs(ctx, port)
+		resp, err := d.tabs.ListTabs(ctx, cdp.ListTabsRequest{Port: port})
 		if err != nil {
 			continue
 		}
-		for _, tab := range tabs {
+		for _, tab := range resp.Tabs {
 			if tab.Type != "page" {
 				continue
 			}
@@ -101,24 +99,26 @@ func (d *SpeakerDetector) findMeetingTab(ctx context.Context) (string, Tab, *Pla
 			}
 		}
 	}
-	return "", Tab{}, nil, nil
+	return "", cdp.Tab{}, nil, nil
 }
 
-func (d *SpeakerDetector) pollCached(
+func (d *Detector) pollCached(
 	ctx context.Context,
 	wsURL string,
 	platform *PlatformConfig,
-) ([]ParticipantState, error) {
+) ([]signals.ParticipantState, error) {
 	if !validCSSClass.MatchString(d.speakingClass) {
 		d.speakingClass = ""
 		return nil, nil
 	}
 	js := fmt.Sprintf(platform.PollJSTemplate, d.speakingClass, d.speakingClass)
-	val, err := eval(ctx, wsURL, js)
+	resp, err := d.evaluator.Evaluate(ctx, cdp.EvaluateRequest{
+		WebSocketURL: wsURL, Expression: js,
+	})
 	if err != nil {
 		return nil, err
 	}
-	if val == "" {
+	if resp.Value == "" {
 		return nil, nil
 	}
 
@@ -126,27 +126,29 @@ func (d *SpeakerDetector) pollCached(
 		Name     string `json:"name"`
 		Speaking bool   `json:"speaking"`
 	}
-	if err := json.Unmarshal([]byte(val), &data); err != nil {
+	if err := json.Unmarshal([]byte(resp.Value), &data); err != nil {
 		return nil, err
 	}
 
-	result := make([]ParticipantState, len(data))
-	for i, d := range data {
-		result[i] = ParticipantState{Name: d.Name, Speaking: d.Speaking}
+	result := make([]signals.ParticipantState, len(data))
+	for i, p := range data {
+		result[i] = signals.ParticipantState{Name: p.Name, Speaking: p.Speaking}
 	}
 	return result, nil
 }
 
-func (d *SpeakerDetector) pollDiscovery(
+func (d *Detector) pollDiscovery(
 	ctx context.Context,
 	wsURL string,
 	platform *PlatformConfig,
-) ([]ParticipantState, error) {
-	val, err := eval(ctx, wsURL, platform.SnapshotJS)
+) ([]signals.ParticipantState, error) {
+	resp, err := d.evaluator.Evaluate(ctx, cdp.EvaluateRequest{
+		WebSocketURL: wsURL, Expression: platform.SnapshotJS,
+	})
 	if err != nil {
 		return nil, err
 	}
-	if val == "" {
+	if resp.Value == "" {
 		return nil, nil
 	}
 
@@ -154,7 +156,7 @@ func (d *SpeakerDetector) pollDiscovery(
 		Name    string   `json:"name"`
 		Classes []string `json:"classes"`
 	}
-	if err := json.Unmarshal([]byte(val), &data); err != nil {
+	if err := json.Unmarshal([]byte(resp.Value), &data); err != nil {
 		return nil, err
 	}
 
@@ -186,7 +188,6 @@ func (d *SpeakerDetector) pollDiscovery(
 		}
 
 		if len(changed) > 0 {
-			// Pick the shortest changed class name
 			shortest := ""
 			for c := range changed {
 				if shortest == "" || len(c) < len(shortest) {
@@ -196,19 +197,19 @@ func (d *SpeakerDetector) pollDiscovery(
 			d.speakingClass = shortest
 			d.prevSnapshot = current
 
-			result := make([]ParticipantState, len(names))
+			result := make([]signals.ParticipantState, len(names))
 			for i, name := range names {
 				_, speaking := current[name][d.speakingClass]
-				result[i] = ParticipantState{Name: name, Speaking: speaking}
+				result[i] = signals.ParticipantState{Name: name, Speaking: speaking}
 			}
 			return result, nil
 		}
 	}
 
 	d.prevSnapshot = current
-	result := make([]ParticipantState, len(names))
+	result := make([]signals.ParticipantState, len(names))
 	for i, name := range names {
-		result[i] = ParticipantState{Name: name, Speaking: false}
+		result[i] = signals.ParticipantState{Name: name, Speaking: false}
 	}
 	return result, nil
 }

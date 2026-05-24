@@ -6,75 +6,12 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
-	"time"
 )
-
-type cdpRequest struct {
-	ID     int       `json:"id"`
-	Method string    `json:"method"`
-	Params cdpParams `json:"params"`
-}
-
-type cdpParams struct {
-	Expression    string `json:"expression"`
-	ReturnByValue bool   `json:"returnByValue"`
-}
-
-type cdpResponse struct {
-	ID     int `json:"id"`
-	Result struct {
-		Result struct {
-			Value string `json:"value"`
-		} `json:"result"`
-	} `json:"result"`
-}
-
-func eval(ctx context.Context, wsURL string, js string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
-	conn, err := wsDial(ctx, wsURL)
-	if err != nil {
-		return "", fmt.Errorf("cdp dial: %w", err)
-	}
-	defer func() { _ = conn.Close() }()
-
-	req := cdpRequest{
-		ID:     1,
-		Method: "Runtime.evaluate",
-		Params: cdpParams{
-			Expression:    js,
-			ReturnByValue: true,
-		},
-	}
-
-	payload, err := json.Marshal(req)
-	if err != nil {
-		return "", fmt.Errorf("cdp marshal: %w", err)
-	}
-
-	if err := wsWrite(conn, payload); err != nil {
-		return "", fmt.Errorf("cdp write: %w", err)
-	}
-
-	respPayload, err := wsRead(conn)
-	if err != nil {
-		return "", fmt.Errorf("cdp read: %w", err)
-	}
-
-	var resp cdpResponse
-	if err := json.Unmarshal(respPayload, &resp); err != nil {
-		return "", fmt.Errorf("cdp unmarshal: %w", err)
-	}
-
-	return resp.Result.Result.Value, nil
-}
 
 func wsDial(ctx context.Context, rawURL string) (net.Conn, error) {
 	u, err := url.Parse(rawURL)
