@@ -2,6 +2,7 @@ package speaker
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/odsod/recorder/internal/conference"
 	"github.com/odsod/recorder/internal/protocol/cdp"
@@ -21,7 +22,8 @@ type Evaluator interface {
 // Detector polls conferencing tabs for participant speaking state.
 // It implements a two-phase detection strategy: first discovering which CSS
 // class indicates speaking state via snapshot diffing, then using that class
-// for efficient cached polling.
+// for efficient cached polling. Discovery requires the candidate class to
+// toggle on/off at least togglesRequired times before locking it in.
 type Detector struct {
 	tabs           TabLister
 	evaluator      Evaluator
@@ -32,7 +34,17 @@ type Detector struct {
 	activeProvider conference.Provider
 	speakingClass  string
 	prevSnapshot   map[string]map[string]struct{}
+	// candidateClass is the current class being validated during discovery.
+	candidateClass string
+	// candidateToggles counts how many times the candidate has toggled.
+	candidateToggles int
+	// candidatePresent tracks whether the candidate was present in the last snapshot.
+	candidatePresent bool
 }
+
+// togglesRequired is the number of on/off transitions a candidate class must
+// exhibit before being confirmed as the speaking indicator.
+const togglesRequired = 3
 
 // NewDetector creates a speaker detector that polls the given CDP ports using
 // the provided conference providers to identify meeting tabs.
@@ -65,6 +77,8 @@ func (d *Detector) Poll(ctx context.Context) (signals.PollResult, error) {
 		d.activeProvider = provider
 		d.speakingClass = ""
 		d.prevSnapshot = nil
+		d.candidateClass = ""
+		d.candidateToggles = 0
 	}
 
 	if wsURL == "" {
@@ -180,21 +194,45 @@ func (d *Detector) pollDiscovery(ctx context.Context, wsURL string) ([]signals.P
 		}
 
 		if len(changed) > 0 {
+			// Pick shortest changed class as candidate.
 			shortest := ""
 			for c := range changed {
 				if shortest == "" || len(c) < len(shortest) {
 					shortest = c
 				}
 			}
-			d.speakingClass = shortest
-			d.prevSnapshot = current
 
-			result := make([]signals.ParticipantState, len(names))
-			for i, name := range names {
-				_, speaking := current[name][d.speakingClass]
-				result[i] = signals.ParticipantState{Name: name, Speaking: speaking}
+			if d.candidateClass == "" || d.candidateClass != shortest {
+				// New candidate — start tracking it.
+				d.candidateClass = shortest
+				d.candidateToggles = 0
+				d.candidatePresent = d.classPresent(current, shortest)
+			} else {
+				// Same candidate — check if it toggled.
+				nowPresent := d.classPresent(current, shortest)
+				if nowPresent != d.candidatePresent {
+					d.candidateToggles++
+					d.candidatePresent = nowPresent
+				}
 			}
-			return result, nil
+
+			if d.candidateToggles >= togglesRequired {
+				slog.InfoContext(ctx, "speaking class confirmed",
+					"class", d.candidateClass,
+					"toggles", d.candidateToggles,
+				)
+				d.speakingClass = d.candidateClass
+				d.candidateClass = ""
+				d.candidateToggles = 0
+				d.prevSnapshot = current
+
+				result := make([]signals.ParticipantState, len(names))
+				for i, name := range names {
+					_, speaking := current[name][d.speakingClass]
+					result[i] = signals.ParticipantState{Name: name, Speaking: speaking}
+				}
+				return result, nil
+			}
 		}
 	}
 
@@ -204,4 +242,14 @@ func (d *Detector) pollDiscovery(ctx context.Context, wsURL string) ([]signals.P
 		result[i] = signals.ParticipantState{Name: name, Speaking: false}
 	}
 	return result, nil
+}
+
+// classPresent reports whether any participant currently has the given class.
+func (d *Detector) classPresent(snapshot map[string]map[string]struct{}, class string) bool {
+	for _, classes := range snapshot {
+		if _, ok := classes[class]; ok {
+			return true
+		}
+	}
+	return false
 }
