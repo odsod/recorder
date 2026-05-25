@@ -2,12 +2,14 @@ package recorder
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"maps"
 	"slices"
 	"time"
 
 	"github.com/odsod/recorder/internal/protocol/whisper"
+	"github.com/odsod/recorder/internal/timeline"
 	"github.com/odsod/recorder/internal/transcribe"
 	"github.com/odsod/recorder/internal/transcript"
 )
@@ -46,11 +48,8 @@ func (r *Recorder) transcribeChunk(ctx context.Context, chunk AudioChunk) {
 
 	r.flushSignalEvents(ctx, chunk.StartTime, chunk.EndTime)
 
-	speakers := r.speakerTimeline.SpeakersIn(chunk.StartTime, chunk.EndTime)
-	speaker := ""
-	if len(speakers) > 0 {
-		speaker = speakers[0]
-	}
+	speakers := r.speakerTimeline.SpeakersInWithDurations(chunk.StartTime, chunk.EndTime)
+	speaker := attributeSpeaker(speakers, r.cfg.Speaker.AmbiguityRatio)
 
 	switch {
 	case sysText != "":
@@ -129,6 +128,23 @@ func (r *Recorder) transcribeChunk(ctx context.Context, chunk AudioChunk) {
 		slog.InfoContext(ctx, "no speech detected")
 	}
 	slog.InfoContext(ctx, "listening")
+}
+
+func attributeSpeaker(speakers []timeline.SpeakerDuration, ambiguityRatio float64) string {
+	switch {
+	case len(speakers) == 0:
+		return ""
+	case len(speakers) == 1:
+		return speakers[0].Name
+	default:
+		if float64(speakers[1].Duration) >= float64(speakers[0].Duration)*ambiguityRatio {
+			total := speakers[0].Duration + speakers[1].Duration
+			pct0 := int(float64(speakers[0].Duration) * 100 / float64(total))
+			pct1 := 100 - pct0
+			return fmt.Sprintf("%s(%d%%),%s(%d%%)", speakers[0].Name, pct0, speakers[1].Name, pct1)
+		}
+		return speakers[0].Name
+	}
 }
 
 func (r *Recorder) flushSignalEvents(ctx context.Context, start, end time.Time) {

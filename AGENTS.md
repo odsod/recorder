@@ -272,8 +272,19 @@ The detector uses a two-phase approach to find the CSS class that indicates spea
 
 - Speaker collector records **all** participants with the speaking indicator each poll tick
 - **Flicker filtering**: a speaker must be seen speaking for 2+ consecutive polls before being appended to the timeline (prevents transient indicator flashes from polluting data)
-- `SpeakersIn(start, end)` returns speakers ordered by **total speaking duration** in the window (dominant speaker first)
-- Transcription worker uses `speakers[0]` (dominant speaker) for attribution
+- `SpeakersInWithDurations(start, end)` returns speakers ordered by **total speaking duration** with duration values
+
+### Ambiguous Attribution
+
+When a chunk's time window contains multiple speakers with similar speaking time,
+the transcription worker double-attributes with percentages rather than picking a
+single (potentially wrong) dominant speaker.
+
+- **Heuristic**: if second speaker's duration ≥ 5% of first speaker's → ambiguous
+- **Format**: `[Alice(70%),Bob(30%)]` — percentages of the two speakers' combined time
+- **Unambiguous**: plain `[Alice]` (no percentage) when single speaker or second is < 30%
+- **Cap**: max 2 speakers attributed per line
+- **Rationale**: short phrases from a new speaker often get misattributed to the previous longer speaker; double-attribution preserves information for downstream summarizers
 
 ## Lockfile
 
