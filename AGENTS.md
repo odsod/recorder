@@ -255,10 +255,24 @@ Local LLM produces structured markdown summaries per segment.
 `SpeakerDetector` scans CDP ports for meeting tabs, auto-detects platform (Meet/Teams),
 discovers speaking indicator class via temporal diffing of CSS class sets.
 
-- **Speaker detection**: exact — platform's own visual indicator, ~1s polling interval
+- **Speaker detection**: multi-speaker — all participants with the speaking indicator are tracked simultaneously
 - **Meeting detection**: tab URL/title changes trigger `MeetingState.Set()`
 - **Platforms**: Meet, Teams (auto-detected by URL on any configured port)
 - **Cache invalidation**: WebSocket URL change → reset discovery
+
+### Class Discovery (Toggle Validation)
+
+The detector uses a two-phase approach to find the CSS class that indicates speaking:
+
+1. **Snapshot diffing**: compare consecutive DOM snapshots, pick shortest changed class as candidate
+2. **Toggle validation**: candidate must toggle on/off at least 3 times before being confirmed (prevents locking onto layout/animation classes that happen to change once)
+
+### Multi-Speaker Timeline
+
+- Speaker collector records **all** participants with the speaking indicator each poll tick
+- **Flicker filtering**: a speaker must be seen speaking for 2+ consecutive polls before being appended to the timeline (prevents transient indicator flashes from polluting data)
+- `SpeakersIn(start, end)` returns speakers ordered by **total speaking duration** in the window (dominant speaker first)
+- Transcription worker uses `speakers[0]` (dominant speaker) for attribution
 
 ## Lockfile
 

@@ -30,6 +30,10 @@ type SpeakerPoller interface {
 	Poll(ctx context.Context) (PollResult, error)
 }
 
+// flickerFilterTicks requires a speaker to be seen speaking for this many
+// consecutive polls before being recorded in the timeline.
+const flickerFilterTicks = 2
+
 // RunSpeakerCollector polls CDP and updates speaker and meeting timelines.
 func RunSpeakerCollector(
 	ctx context.Context,
@@ -38,7 +42,9 @@ func RunSpeakerCollector(
 	participantSet *timeline.ParticipantSet,
 	meetingState *timeline.MeetingState,
 ) {
-	var activeSpeaker string
+	activeSpeakers := make(map[string]struct{})
+	// Track consecutive speaking ticks per participant for flicker filtering.
+	speakingTicks := make(map[string]int)
 
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
@@ -66,6 +72,8 @@ func RunSpeakerCollector(
 					slog.InfoContext(ctx, "meeting ended")
 				}
 				participantSet.Reset()
+				activeSpeakers = make(map[string]struct{})
+				speakingTicks = make(map[string]int)
 			}
 
 			if result.Participants == nil {
@@ -79,18 +87,35 @@ func RunSpeakerCollector(
 			}
 			participantSet.Update(names)
 
-			var speaker string
+			currentSpeaking := make(map[string]struct{})
 			for _, s := range result.Participants {
 				if s.Speaking {
-					speaker = s.Name
-					break
+					speakingTicks[s.Name]++
+					if speakingTicks[s.Name] >= flickerFilterTicks {
+						currentSpeaking[s.Name] = struct{}{}
+					}
+				} else {
+					speakingTicks[s.Name] = 0
 				}
 			}
 
-			if speaker != activeSpeaker {
-				activeSpeaker = speaker
-				speakerTimeline.Append(now, speaker)
+			for name := range currentSpeaking {
+				if _, was := activeSpeakers[name]; !was {
+					slog.InfoContext(ctx, "speaker started",
+						"name", name,
+					)
+					speakerTimeline.Append(now, name)
+				}
 			}
+			for name := range activeSpeakers {
+				if _, is := currentSpeaking[name]; !is {
+					slog.InfoContext(ctx, "speaker stopped",
+						"name", name,
+					)
+					speakerTimeline.Append(now, "")
+				}
+			}
+			activeSpeakers = currentSpeaking
 		}
 	}
 }

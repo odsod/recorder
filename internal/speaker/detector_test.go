@@ -185,7 +185,6 @@ func TestPoll_DiscoveryToCache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// First poll: participants returned but all speaking=false
 	if len(result.Participants) != 2 {
 		t.Fatalf("expected 2 participants, got %d", len(result.Participants))
 	}
@@ -195,29 +194,60 @@ func TestPoll_DiscoveryToCache(t *testing.T) {
 		}
 	}
 
-	// Poll 2: class changed (Alice gains "speaking-cls")
-	provider.snapshots = []conference.ParticipantSnapshot{
+	// Toggle the candidate class through required cycles.
+	// Each on/off pair counts as 2 toggles. We need togglesRequired (3) toggles.
+	withX := []conference.ParticipantSnapshot{
 		{Name: "Alice", Classes: []string{"cls-a", "cls-b", "x"}},
 		{Name: "Bob", Classes: []string{"cls-a"}},
 	}
-	eval.value = "snapshot2"
+	withoutX := []conference.ParticipantSnapshot{
+		{Name: "Alice", Classes: []string{"cls-a", "cls-b"}},
+		{Name: "Bob", Classes: []string{"cls-a"}},
+	}
+
+	// Poll 2: "x" appears — candidate selected, candidatePresent=true, toggles=0
+	provider.snapshots = withX
+	eval.value = "s"
 	result, err = d.Poll(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Speaking class discovered: "x" (shortest changed class)
+	assertNoSpeaking(t, result.Participants)
+
+	// Poll 3: "x" gone — toggle 1 (present->absent)
+	provider.snapshots = withoutX
+	result, err = d.Poll(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertNoSpeaking(t, result.Participants)
+
+	// Poll 4: "x" back — toggle 2 (absent->present)
+	provider.snapshots = withX
+	result, err = d.Poll(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertNoSpeaking(t, result.Participants)
+
+	// Poll 5: "x" gone — toggle 3 (present->absent) — confirmed!
+	provider.snapshots = withoutX
+	result, err = d.Poll(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(result.Participants) != 2 {
 		t.Fatalf("expected 2 participants, got %d", len(result.Participants))
 	}
-	// Alice should be speaking (has class "x")
-	if !result.Participants[0].Speaking {
-		t.Error("expected Alice to be speaking")
+	// Class confirmed; Alice does NOT have "x" in this snapshot, so not speaking
+	if result.Participants[0].Speaking {
+		t.Error("expected Alice to not be speaking (class absent this poll)")
 	}
 	if result.Participants[1].Speaking {
 		t.Error("expected Bob to not be speaking")
 	}
 
-	// Poll 3: should use cached polling now
+	// Next poll: should use cached polling now
 	provider.pollJS = "poll()"
 	provider.participants = []conference.Participant{
 		{Name: "Alice", Speaking: false},
@@ -239,6 +269,15 @@ func TestPoll_DiscoveryToCache(t *testing.T) {
 	}
 }
 
+func assertNoSpeaking(t *testing.T, participants []signals.ParticipantState) {
+	t.Helper()
+	for _, p := range participants {
+		if p.Speaking {
+			t.Errorf("expected no one speaking during discovery, but %s is speaking", p.Name)
+		}
+	}
+}
+
 func TestPoll_PollExpressionError_ResetsToDiscovery(t *testing.T) {
 	tabs := &mockTabLister{tabs: []cdp.Tab{
 		{
@@ -257,13 +296,20 @@ func TestPoll_PollExpressionError_ResetsToDiscovery(t *testing.T) {
 
 	d := speaker.NewDetector(tabs, eval, []int{9222}, []conference.Provider{provider})
 
-	// Get into cached state (two discovery polls).
-	// Use different-length class names so shortest-pick is deterministic.
+	// Get into cached state via toggle validation.
 	provider.snapshots = []conference.ParticipantSnapshot{{Name: "Alice", Classes: []string{"base-class"}}}
 	_, _ = d.Poll(context.Background())
-	provider.snapshots = []conference.ParticipantSnapshot{
-		{Name: "Alice", Classes: []string{"base-class", "speaking-indicator"}},
-	}
+	// Toggle 1: class appears (candidate selected, present=true)
+	provider.snapshots = []conference.ParticipantSnapshot{{Name: "Alice", Classes: []string{"base-class", "x"}}}
+	_, _ = d.Poll(context.Background())
+	// Toggle 2: class disappears (toggle count: 1)
+	provider.snapshots = []conference.ParticipantSnapshot{{Name: "Alice", Classes: []string{"base-class"}}}
+	_, _ = d.Poll(context.Background())
+	// Toggle 3: class reappears (toggle count: 2)
+	provider.snapshots = []conference.ParticipantSnapshot{{Name: "Alice", Classes: []string{"base-class", "x"}}}
+	_, _ = d.Poll(context.Background())
+	// Toggle 4: class disappears (toggle count: 3 — confirmed!)
+	provider.snapshots = []conference.ParticipantSnapshot{{Name: "Alice", Classes: []string{"base-class"}}}
 	_, _ = d.Poll(context.Background())
 
 	// Now PollExpression returns an error (e.g., invalid class)
@@ -277,9 +323,7 @@ func TestPoll_PollExpressionError_ResetsToDiscovery(t *testing.T) {
 		t.Errorf("expected nil participants after poll error, got %+v", result.Participants)
 	}
 
-	// Next poll should be in discovery mode again (prevSnapshot is stale,
-	// so it will diff and find a new class — but that's fine, we verify
-	// the detector doesn't crash and returns results).
+	// Next poll should be in discovery mode again.
 	provider.pollErr = nil
 	provider.snapshots = []conference.ParticipantSnapshot{{Name: "Alice", Classes: []string{"new-class"}}}
 	eval.value = "snap"
@@ -287,11 +331,12 @@ func TestPoll_PollExpressionError_ResetsToDiscovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Diff against stale prevSnapshot detects changed classes and picks one.
-	// Alice has "new-class" — whether she's "speaking" depends on which class
-	// is shortest. We just verify results are returned without error.
+	// In discovery mode, no one is speaking yet (needs toggle validation).
 	if len(result.Participants) != 1 {
 		t.Fatalf("expected 1 participant, got %d", len(result.Participants))
+	}
+	if result.Participants[0].Speaking {
+		t.Error("expected no one speaking during re-discovery")
 	}
 }
 
