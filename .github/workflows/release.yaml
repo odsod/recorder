@@ -1,0 +1,48 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install mise
+        uses: jdx/mise-action@v2
+
+      - name: Calculate calver tag
+        id: calver
+        run: |
+          year=$(date +%Y)
+          month=$(date +%-m)
+          last=$(git tag -l "v${year}.${month}.*" | sort -V | tail -1)
+          if [ -z "$last" ]; then
+            patch=0
+          else
+            patch=$(( ${last##*.} + 1 ))
+          fi
+          tag="v${year}.${month}.${patch}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Create tag
+        run: |
+          git tag ${{ steps.calver.outputs.tag }}
+          git push origin ${{ steps.calver.outputs.tag }}
+
+      - name: Run goreleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
