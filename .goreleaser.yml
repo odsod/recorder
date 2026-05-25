@@ -1,0 +1,17 @@
+version: 2
+
+builds:
+  - binary: recorder
+    goos:
+      - linux
+    goarch:
+      - amd64
+    ldflags:
+      - -s -w -X main.version={{.Tag}}
+
+archives:
+  - formats:
+      - tar.gz
+
+changelog:
+  use: github

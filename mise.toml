@@ -1,10 +1,11 @@
 [tools]
 go = "1.26"
 golangci-lint = "2.12"
+goreleaser = "2"
 
 [tasks.build]
-description = "Full CI build (lint, test, tidy, diff)"
-run = "mise run lint && mise run test && mise run tidy && mise run diff"
+description = "Full CI build (lint, test, tidy, check, diff)"
+run = "mise run lint && mise run test && mise run tidy && mise run check && mise run diff"
 
 [tasks.lint]
 description = "Lint Go code"
@@ -18,6 +19,10 @@ run = "go test -cover ./..."
 description = "Tidy Go modules"
 run = "go mod tidy"
 
+[tasks.check]
+description = "Validate goreleaser config and snapshot build"
+run = "goreleaser check && goreleaser build --snapshot --clean && rm -rf dist"
+
 [tasks.diff]
 description = "Check for uncommitted diffs (CI gate)"
 run = """
@@ -27,5 +32,28 @@ fi
 """
 
 [tasks.install]
-description = "Build and install recorder binary"
-run = "go install ."
+description = "Build and install recorder binary with calver"
+run = """
+version=$(git tag -l 'v*' | sort -V | tail -1)
+if [ -z "$version" ]; then version="dev"; fi
+go install -ldflags "-X main.version=$version" .
+"""
+
+[tasks.release]
+description = "Tag a new calver release and publish with goreleaser"
+run = """
+year=$(date +%Y)
+month=$(date +%-m)
+last=$(git tag -l "v${year}.${month}.*" | sort -V | tail -1)
+if [ -z "$last" ]; then
+  patch=0
+else
+  patch=$(( ${last##*.} + 1 ))
+fi
+tag="v${year}.${month}.${patch}"
+echo "Releasing $tag"
+git tag "$tag"
+git push origin "$tag"
+goreleaser release --clean
+echo "Released recorder $tag"
+"""
