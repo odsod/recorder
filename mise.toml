@@ -52,8 +52,11 @@ else
 fi
 tag="v${year}.${month}.${patch}"
 echo "Releasing $tag"
-git tag "$tag"
-git push origin "$tag"
+sha=$(git rev-parse HEAD)
+gh api repos/${GITHUB_REPOSITORY:-odsod/recorder}/git/refs \
+  -f ref="refs/tags/$tag" \
+  -f sha="$sha"
+git fetch --tags
 goreleaser release --clean
 echo "Released recorder $tag"
 """
