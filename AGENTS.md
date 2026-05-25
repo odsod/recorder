@@ -89,6 +89,7 @@ recorder segment <transcript> --boundaries    # only show boundaries, no LLM cal
 recorder prompts                              # print resolved system prompts (debug)
 recorder prompts cleanup                      # print one prompt
 recorder prompts summarize combine            # print a subset
+recorder version                              # print build version (calver)
 ```
 
 ## Daemon Controls

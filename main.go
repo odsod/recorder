@@ -18,6 +18,8 @@ import (
 	"github.com/odsod/recorder/internal/transcript"
 )
 
+var version = "dev"
+
 func main() {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level:       slog.LevelInfo,
@@ -25,11 +27,14 @@ func main() {
 	})))
 
 	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "usage: recorder <run|note|segment|prompts>\n")
+		fmt.Fprintf(os.Stderr, "usage: recorder <run|note|segment|prompts|version>\n")
 		os.Exit(1)
 	}
 
 	switch os.Args[1] {
+	case "version":
+		fmt.Println(version)
+		return
 	case "run":
 		if err := runRecorder(); err != nil {
 			slog.ErrorContext(context.Background(), "run failed",
