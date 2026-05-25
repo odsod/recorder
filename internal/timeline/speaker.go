@@ -31,21 +31,25 @@ func (t *SpeakerTimeline) Append(ts time.Time, name string) {
 	t.evict()
 }
 
-// SpeakersIn returns speakers active during [start, end], ordered by total
-// speaking time (dominant speaker first).
-func (t *SpeakerTimeline) SpeakersIn(start, end time.Time) []string {
+// SpeakerDuration pairs a speaker name with their total speaking time.
+type SpeakerDuration struct {
+	Name     string
+	Duration time.Duration
+}
+
+// SpeakersInWithDurations returns speakers active during [start, end], ordered
+// by total speaking time (dominant speaker first), with durations included.
+func (t *SpeakerTimeline) SpeakersInWithDurations(start, end time.Time) []SpeakerDuration {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	// Collect all speaker events relevant to the window.
 	type span struct {
 		name      string
 		spanStart time.Time
 		spanEnd   time.Time
 	}
 
-	// Track which speakers are active leading up to and within the window.
-	activeSet := make(map[string]time.Time) // name -> when they started (clamped to window start)
+	activeSet := make(map[string]time.Time)
 	var spans []span
 
 	for _, c := range t.changes {
@@ -53,22 +57,15 @@ func (t *SpeakerTimeline) SpeakersIn(start, end time.Time) []string {
 			break
 		}
 		if !c.Time.After(start) {
-			// Events before window: track active state at window start.
 			if c.Name != "" {
 				activeSet[c.Name] = start
 			} else {
-				// A stop event before the window — remove all (old single-speaker model)
-				// With multi-speaker, "" means one speaker stopped, but we don't know which.
-				// Clear all since old entries used "" as "silence".
 				activeSet = make(map[string]time.Time)
 			}
 		} else {
-			// Events within the window.
 			if c.Name != "" {
 				activeSet[c.Name] = c.Time
 			} else {
-				// Speaker stop — close spans for all currently active speakers
-				// that started before this stop event.
 				for name, spanStart := range activeSet {
 					spans = append(spans, span{name: name, spanStart: spanStart, spanEnd: c.Time})
 				}
@@ -77,37 +74,37 @@ func (t *SpeakerTimeline) SpeakersIn(start, end time.Time) []string {
 		}
 	}
 
-	// Close any still-active spans at window end.
 	for name, spanStart := range activeSet {
 		spans = append(spans, span{name: name, spanStart: spanStart, spanEnd: end})
 	}
 
-	// Sum duration per speaker.
 	durations := make(map[string]time.Duration)
 	for _, s := range spans {
 		durations[s.name] += s.spanEnd.Sub(s.spanStart)
 	}
 
-	// Sort by duration descending.
-	type entry struct {
-		name     string
-		duration time.Duration
-	}
-	var entries []entry
+	entries := make([]SpeakerDuration, 0, len(durations))
 	for name, dur := range durations {
-		entries = append(entries, entry{name, dur})
+		entries = append(entries, SpeakerDuration{name, dur})
 	}
 	for i := range entries {
 		for j := i + 1; j < len(entries); j++ {
-			if entries[j].duration > entries[i].duration {
+			if entries[j].Duration > entries[i].Duration {
 				entries[i], entries[j] = entries[j], entries[i]
 			}
 		}
 	}
 
+	return entries
+}
+
+// SpeakersIn returns speakers active during [start, end], ordered by total
+// speaking time (dominant speaker first).
+func (t *SpeakerTimeline) SpeakersIn(start, end time.Time) []string {
+	entries := t.SpeakersInWithDurations(start, end)
 	result := make([]string, len(entries))
 	for i, e := range entries {
-		result[i] = e.name
+		result[i] = e.Name
 	}
 	return result
 }

@@ -129,6 +129,27 @@ func TestSpeakerTimeline_ConcurrentSpeakers(tt *testing.T) {
 	assertStrings(tt, result, []string{"Bob", "Alice"})
 }
 
+func TestSpeakerTimeline_WithDurations(tt *testing.T) {
+	tl := NewSpeakerTimeline(600)
+	// Alice speaks 09:00:00-09:00:05 (5s)
+	tl.Append(ts("09:00:00"), "Alice")
+	tl.Append(ts("09:00:05"), "")
+	// Bob speaks 09:00:05-09:00:20 (15s)
+	tl.Append(ts("09:00:05"), "Bob")
+	tl.Append(ts("09:00:20"), "")
+
+	result := tl.SpeakersInWithDurations(ts("09:00:00"), ts("09:00:20"))
+	if len(result) != 2 {
+		tt.Fatalf("expected 2 speakers, got %v", result)
+	}
+	if result[0].Name != "Bob" || result[0].Duration != 15*time.Second {
+		tt.Errorf("expected Bob 15s first, got %s %v", result[0].Name, result[0].Duration)
+	}
+	if result[1].Name != "Alice" || result[1].Duration != 5*time.Second {
+		tt.Errorf("expected Alice 5s second, got %s %v", result[1].Name, result[1].Duration)
+	}
+}
+
 func TestParticipantSet_InitialUpdate(tt *testing.T) {
 	ps := NewParticipantSet()
 	newNames := ps.Update(setOf("Alice", "Bob"))

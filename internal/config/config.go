@@ -40,6 +40,11 @@ type SignalsConfig struct {
 	CDPPorts          []int `json:"cdpPorts"`
 }
 
+// SpeakerConfig holds speaker attribution settings.
+type SpeakerConfig struct {
+	AmbiguityRatio float64 `json:"ambiguityRatio"`
+}
+
 // LogConfig holds logging settings.
 type LogConfig struct {
 	// File is the path for JSONL log output. Empty disables file logging.
@@ -54,6 +59,7 @@ type Config struct {
 	Segments    SegmentsConfig    `json:"segments"`
 	Dedup       DedupConfig       `json:"dedup"`
 	Signals     SignalsConfig     `json:"signals"`
+	Speaker     SpeakerConfig     `json:"speaker"`
 	Log         LogConfig         `json:"log"`
 	PromptPaths PromptPathsConfig `json:"prompts"`
 	PromptVars  PromptVarsConfig  `json:"promptVars"`
@@ -83,6 +89,9 @@ func defaults() Config {
 		Signals: SignalsConfig{
 			SilenceThresholdS: 180,
 			CDPPorts:          []int{},
+		},
+		Speaker: SpeakerConfig{
+			AmbiguityRatio: 0.05,
 		},
 		PromptVars: defaultPromptVars(),
 	}
