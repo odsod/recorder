@@ -31,10 +31,18 @@ func NewCleaner(chat ChatCompleter, prompt string) *Cleaner {
 }
 
 // Cleanup removes fillers, fixes grammar, and filters ASR hallucinations.
-func (c *Cleaner) Cleanup(ctx context.Context, text string) (string, error) {
+// When participants are provided, their names are included in the system prompt
+// to help the LLM correct ASR misspellings of participant names.
+func (c *Cleaner) Cleanup(ctx context.Context, text string, participants []string) (string, error) {
+	systemPrompt := c.prompt
+	if len(participants) > 0 {
+		systemPrompt += "\n\n## Meeting participants\n\nThe following people are in this meeting: " +
+			strings.Join(participants, ", ") +
+			". Use these exact spellings when correcting names in the transcript."
+	}
 	resp, err := c.chat.Complete(ctx, llm.CompleteRequest{
 		Messages: []llm.Message{
-			{Role: "system", Content: c.prompt},
+			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: text},
 		},
 	})

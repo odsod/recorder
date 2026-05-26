@@ -50,10 +50,11 @@ func (r *Recorder) transcribeChunk(ctx context.Context, chunk AudioChunk) {
 
 	speakers := r.speakerTimeline.SpeakersInWithDurations(chunk.StartTime, chunk.EndTime)
 	speaker := attributeSpeaker(speakers, r.cfg.Speaker.AmbiguityRatio)
+	participants := r.currentParticipants()
 
 	switch {
 	case sysText != "":
-		cleaned, err := r.svc.Cleaner.Cleanup(ctx, sysText)
+		cleaned, err := r.svc.Cleaner.Cleanup(ctx, sysText, participants)
 		if err != nil {
 			slog.ErrorContext(ctx, "cleanup sys failed",
 				"err", err,
@@ -75,7 +76,7 @@ func (r *Recorder) transcribeChunk(ctx context.Context, chunk AudioChunk) {
 			r.segmenter.OnSpeech(e)
 
 			if micText != "" && !transcribe.TextsOverlap(cleaned, micText, r.cfg.Dedup.Threshold) {
-				micCleaned, err := r.svc.Cleaner.Cleanup(ctx, micText)
+				micCleaned, err := r.svc.Cleaner.Cleanup(ctx, micText, participants)
 				if err != nil {
 					slog.ErrorContext(ctx, "cleanup mic failed",
 						"err", err,
@@ -103,7 +104,7 @@ func (r *Recorder) transcribeChunk(ctx context.Context, chunk AudioChunk) {
 				"text", truncate(micText, 60),
 			)
 		} else {
-			cleaned, err := r.svc.Cleaner.Cleanup(ctx, micText)
+			cleaned, err := r.svc.Cleaner.Cleanup(ctx, micText, participants)
 			if err != nil {
 				slog.ErrorContext(ctx, "cleanup mic failed",
 					"err", err,
@@ -145,6 +146,14 @@ func attributeSpeaker(speakers []timeline.SpeakerDuration, ambiguityRatio float6
 		}
 		return speakers[0].Name
 	}
+}
+
+func (r *Recorder) currentParticipants() []string {
+	all := r.participantSet.GetAll()
+	if len(all) == 0 {
+		return nil
+	}
+	return slices.Sorted(maps.Keys(all))
 }
 
 func (r *Recorder) flushSignalEvents(ctx context.Context, start, end time.Time) {

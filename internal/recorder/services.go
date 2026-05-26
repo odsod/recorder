@@ -16,7 +16,7 @@ type Transcriber interface {
 
 // TextCleaner cleans up raw ASR transcription text via LLM.
 type TextCleaner interface {
-	Cleanup(ctx context.Context, text string) (string, error)
+	Cleanup(ctx context.Context, text string, participants []string) (string, error)
 }
 
 // SegmentSummarizer produces structured summaries for transcript segments.
