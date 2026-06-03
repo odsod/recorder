@@ -97,7 +97,7 @@ func TestSpeakerTimeline_Eviction(tt *testing.T) {
 	result := tl.SpeakersIn(ts("09:00:00"), ts("09:00:30"))
 	assertStrings(tt, result, nil)
 
-	result = tl.SpeakersIn(ts("09:04:30"), ts("09:05:00"))
+	result = tl.SpeakersIn(ts("09:04:30"), ts("09:05:01"))
 	assertStrings(tt, result, []string{"Bob"})
 }
 
@@ -108,33 +108,20 @@ func TestSpeakerTimeline_EmptyTimeline(tt *testing.T) {
 }
 
 func TestSpeakerTimeline_ConcurrentSpeakers(tt *testing.T) {
-	// Simulates multi-speaker timeline: both Alice and Bob start speaking,
-	// their events interleave.
 	tl := NewSpeakerTimeline(600)
-	tl.Append(ts("09:00:00"), "Alice")
-	tl.Append(ts("09:00:02"), "Bob")
-	// Alice stops
-	tl.Append(ts("09:00:10"), "")
-	// Bob continues (re-appears after the stop-all)
-	tl.Append(ts("09:00:10"), "Bob")
-	tl.Append(ts("09:00:15"), "")
+	tl.SetSpeakerActive(ts("09:00:00"), "Alice", true)
+	tl.SetSpeakerActive(ts("09:00:02"), "Bob", true)
+	tl.SetSpeakerActive(ts("09:00:10"), "Alice", false)
+	tl.SetSpeakerActive(ts("09:00:15"), "Bob", false)
 
 	result := tl.SpeakersIn(ts("09:00:00"), ts("09:00:15"))
-	// Bob: 2s + 5s = 7s (two spans: 09:00:02-09:00:10 via first clear, 09:00:10-09:00:15)
-	// Wait — with "" clearing all, Alice: 09:00:00-09:00:10 = 10s, Bob: 09:00:02-09:00:10 + 09:00:10-09:00:15 = 8+5=13s
-	// Actually: first "" at 09:00:10 closes all active (Alice started at 00, Bob at 02).
-	// Alice span: 00-10 = 10s. Bob first span: 02-10 = 8s.
-	// Then Bob starts again at 10, stops at 15: 5s. Bob total = 13s.
-	// Bob > Alice, so Bob first.
 	assertStrings(tt, result, []string{"Bob", "Alice"})
 }
 
 func TestSpeakerTimeline_WithDurations(tt *testing.T) {
 	tl := NewSpeakerTimeline(600)
-	// Alice speaks 09:00:00-09:00:05 (5s)
 	tl.Append(ts("09:00:00"), "Alice")
 	tl.Append(ts("09:00:05"), "")
-	// Bob speaks 09:00:05-09:00:20 (15s)
 	tl.Append(ts("09:00:05"), "Bob")
 	tl.Append(ts("09:00:20"), "")
 
@@ -147,6 +134,70 @@ func TestSpeakerTimeline_WithDurations(tt *testing.T) {
 	}
 	if result[1].Name != "Alice" || result[1].Duration != 5*time.Second {
 		tt.Errorf("expected Alice 5s second, got %s %v", result[1].Name, result[1].Duration)
+	}
+}
+
+func TestSpeakerTimeline_CoverageOverlappingSpeakers(tt *testing.T) {
+	tl := NewSpeakerTimeline(600)
+	tl.SetSpeakerActive(ts("09:00:00"), "Alice", true)
+	tl.SetSpeakerActive(ts("09:00:02"), "Bob", true)
+	tl.SetSpeakerActive(ts("09:00:08"), "Alice", false)
+	tl.SetSpeakerActive(ts("09:00:10"), "Bob", false)
+
+	got := tl.Coverage(ts("09:00:00"), ts("09:00:10"), SpeakerLookupOptions{
+		MinCandidatePct:      0.05,
+		MinCandidateDuration: 250 * time.Millisecond,
+	})
+
+	assertCandidates(tt, got.Candidates, []wantCandidate{
+		{Name: "Alice", Coverage: 8 * time.Second, Pct: 0.8},
+		{Name: "Bob", Coverage: 8 * time.Second, Pct: 0.8},
+	})
+}
+
+func TestSpeakerTimeline_CoverageFiltersByLowThreshold(tt *testing.T) {
+	tl := NewSpeakerTimeline(600)
+	tl.SetSpeakerActive(ts("09:00:00"), "Alice", true)
+	tl.SetSpeakerActive(ts("09:00:10"), "Alice", false)
+	tl.SetSpeakerActive(ts("09:00:09"), "Bob", true)
+	tl.SetSpeakerActive(ts("09:00:10"), "Bob", false)
+
+	got := tl.Coverage(ts("09:00:00"), ts("09:00:10"), SpeakerLookupOptions{
+		MinCandidatePct:      0.05,
+		MinCandidateDuration: 250 * time.Millisecond,
+	})
+
+	assertCandidates(tt, got.Candidates, []wantCandidate{
+		{Name: "Alice", Coverage: 10 * time.Second, Pct: 1.0},
+		{Name: "Bob", Coverage: 1 * time.Second, Pct: 0.1},
+	})
+}
+
+func TestSpeakerTimeline_CoverageFiltersByDuration(tt *testing.T) {
+	tl := NewSpeakerTimeline(600)
+	tl.SetSpeakerActive(ts("09:00:00"), "Alice", true)
+	tl.SetSpeakerActive(ts("09:00:00").Add(100*time.Millisecond), "Alice", false)
+
+	got := tl.Coverage(ts("09:00:00"), ts("09:00:01"), SpeakerLookupOptions{
+		MinCandidatePct:      0.05,
+		MinCandidateDuration: 250 * time.Millisecond,
+	})
+
+	if len(got.Candidates) != 0 {
+		tt.Fatalf("got %v, want no candidates", got.Candidates)
+	}
+}
+
+func TestSpeakerTimeline_CoverageNoActiveSpeakers(tt *testing.T) {
+	tl := NewSpeakerTimeline(600)
+
+	got := tl.Coverage(ts("09:00:00"), ts("09:00:10"), SpeakerLookupOptions{
+		MinCandidatePct:      0.05,
+		MinCandidateDuration: 250 * time.Millisecond,
+	})
+
+	if len(got.Candidates) != 0 {
+		tt.Fatalf("got %v, want no candidates", got.Candidates)
 	}
 }
 
@@ -186,6 +237,31 @@ func TestParticipantSet_Reset(tt *testing.T) {
 	assertSet(tt, ps.GetAll(), setOf())
 	newNames := ps.Update(setOf("Alice"))
 	assertSet(tt, newNames, setOf("Alice"))
+}
+
+type wantCandidate struct {
+	Name     string
+	Coverage time.Duration
+	Pct      float64
+}
+
+func assertCandidates(tt *testing.T, got []SpeakerCandidate, want []wantCandidate) {
+	tt.Helper()
+	if len(got) != len(want) {
+		tt.Fatalf("got %v, want %v", got, want)
+	}
+	for i, candidate := range got {
+		w := want[i]
+		if candidate.Name != w.Name {
+			tt.Fatalf("candidate[%d].Name = %q, want %q", i, candidate.Name, w.Name)
+		}
+		if candidate.Coverage != w.Coverage {
+			tt.Fatalf("candidate[%d].Coverage = %s, want %s", i, candidate.Coverage, w.Coverage)
+		}
+		if diff := candidate.CoveragePct - w.Pct; diff < -0.0001 || diff > 0.0001 {
+			tt.Fatalf("candidate[%d].CoveragePct = %.4f, want %.4f", i, candidate.CoveragePct, w.Pct)
+		}
+	}
 }
 
 func assertStrings(tt *testing.T, got, want []string) {

@@ -50,6 +50,15 @@ type TranscribeRequest struct {
 type TranscribeResponse struct {
 	// Text is the transcribed speech with normalized whitespace.
 	Text string
+	// Segments are timestamped transcription chunks from verbose_json responses.
+	Segments []Segment
+}
+
+// Segment is a timestamped transcription segment relative to the uploaded audio.
+type Segment struct {
+	StartSec float64
+	EndSec   float64
+	Text     string
 }
 
 // Client communicates with an OpenAI-compatible audio transcription endpoint.
@@ -80,7 +89,7 @@ func (c *Client) Transcribe(ctx context.Context, req TranscribeRequest) (Transcr
 	if err := writer.WriteField("model", "whisper-1"); err != nil {
 		return TranscribeResponse{}, err
 	}
-	if err := writer.WriteField("response_format", "json"); err != nil {
+	if err := writer.WriteField("response_format", "verbose_json"); err != nil {
 		return TranscribeResponse{}, err
 	}
 	if err := writer.Close(); err != nil {
@@ -111,14 +120,43 @@ func (c *Client) Transcribe(ctx context.Context, req TranscribeRequest) (Transcr
 		return TranscribeResponse{}, &TranscriptionError{StatusCode: resp.StatusCode, Body: respBody}
 	}
 
-	var result struct {
-		Text string `json:"text"`
-	}
+	var result wireResponse
 	if err := json.Unmarshal(respBody, &result); err != nil {
 		return TranscribeResponse{}, err
 	}
 
-	text := strings.TrimSpace(result.Text)
-	text = spaceRe.ReplaceAllString(text, " ")
-	return TranscribeResponse{Text: text}, nil
+	return normalizeResponse(result), nil
+}
+
+type wireResponse struct {
+	Text     string        `json:"text"`
+	Segments []wireSegment `json:"segments"`
+}
+
+type wireSegment struct {
+	StartSec float64 `json:"start"`
+	EndSec   float64 `json:"end"`
+	Text     string  `json:"text"`
+}
+
+func normalizeResponse(result wireResponse) TranscribeResponse {
+	text := normalizeText(result.Text)
+	segments := make([]Segment, 0, len(result.Segments))
+	for _, s := range result.Segments {
+		segmentText := normalizeText(s.Text)
+		if segmentText == "" {
+			continue
+		}
+		segments = append(segments, Segment{
+			StartSec: s.StartSec,
+			EndSec:   s.EndSec,
+			Text:     segmentText,
+		})
+	}
+	return TranscribeResponse{Text: text, Segments: segments}
+}
+
+func normalizeText(text string) string {
+	text = strings.TrimSpace(text)
+	return spaceRe.ReplaceAllString(text, " ")
 }

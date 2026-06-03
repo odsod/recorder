@@ -14,13 +14,6 @@ func (r *Recorder) appendEvent(ctx context.Context, e transcript.Event) {
 	)
 }
 
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n]
-}
-
 func setsEqual(a, b map[string]struct{}) bool {
 	if len(a) != len(b) {
 		return false

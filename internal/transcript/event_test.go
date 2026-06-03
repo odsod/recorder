@@ -19,6 +19,21 @@ func TestEvent_String_SysWithSpeaker(t *testing.T) {
 	}
 }
 
+func TestEvent_String_SysWithSpeakerPercentages(t *testing.T) {
+	e := Event{
+		Time:    ts("15:04:32"),
+		Type:    Speech,
+		Source:  "sys",
+		Speaker: "Alice 55% / Bob 35%",
+		Text:    "Hello world",
+	}
+	got := e.String()
+	want := "[15:04:32] 🔊 **sys** [Alice 55% / Bob 35%] Hello world"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
 func TestEvent_String_MicNoSpeaker(t *testing.T) {
 	e := Event{Time: ts("09:00:00"), Type: Speech, Source: "mic", Text: "Some text"}
 	got := e.String()
