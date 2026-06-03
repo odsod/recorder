@@ -26,8 +26,8 @@ func TestTranscribe_Success(t *testing.T) {
 		if model := r.FormValue("model"); model != "whisper-1" {
 			t.Errorf("expected model whisper-1, got %s", model)
 		}
-		if rf := r.FormValue("response_format"); rf != "json" {
-			t.Errorf("expected response_format json, got %s", rf)
+		if rf := r.FormValue("response_format"); rf != "verbose_json" {
+			t.Errorf("expected response_format verbose_json, got %s", rf)
 		}
 
 		file, header, err := r.FormFile("file")
@@ -44,7 +44,13 @@ func TestTranscribe_Success(t *testing.T) {
 			t.Errorf("unexpected file content: %q", string(data))
 		}
 
-		resp := map[string]string{"text": " Hello   world "}
+		resp := map[string]any{
+			"text": " Hello   world ",
+			"segments": []map[string]any{
+				{"start": 0.5, "end": 1.25, "text": " Hello   segment "},
+				{"start": 1.25, "end": 2.0, "text": "   "},
+			},
+		}
 		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer srv.Close()
@@ -62,6 +68,13 @@ func TestTranscribe_Success(t *testing.T) {
 	}
 	if resp.Text != "Hello world" {
 		t.Errorf("expected 'Hello world', got %q", resp.Text)
+	}
+	if len(resp.Segments) != 1 {
+		t.Fatalf("expected 1 segment, got %d", len(resp.Segments))
+	}
+	seg := resp.Segments[0]
+	if seg.StartSec != 0.5 || seg.EndSec != 1.25 || seg.Text != "Hello segment" {
+		t.Errorf("unexpected segment: %+v", seg)
 	}
 }
 

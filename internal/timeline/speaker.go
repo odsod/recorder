@@ -1,6 +1,8 @@
 package timeline
 
 import (
+	"slices"
+	"sort"
 	"sync"
 	"time"
 )
@@ -8,7 +10,10 @@ import (
 // SpeakerChange records a speaker transition at a point in time.
 type SpeakerChange struct {
 	Time time.Time
-	Name string // empty string means a speaker stopped
+	Name string
+	// Active reports whether Name became active or inactive at Time.
+	// Empty Name with Active=false means all speakers became inactive.
+	Active bool
 }
 
 // SpeakerTimeline is a time-indexed log of speaker start/stop events with LRU eviction.
@@ -23,11 +28,49 @@ func NewSpeakerTimeline(maxAgeSecs int) *SpeakerTimeline {
 	return &SpeakerTimeline{maxAgeSec: float64(maxAgeSecs)}
 }
 
-// Append records a speaker change at the given timestamp.
+// Append records a full active-speaker-set change at the given timestamp.
 func (t *SpeakerTimeline) Append(ts time.Time, name string) {
+	active := make(map[string]struct{})
+	if name != "" {
+		active[name] = struct{}{}
+	}
+	t.SetActive(ts, active)
+}
+
+// SetSpeakerActive records an independent active/inactive transition for one speaker.
+func (t *SpeakerTimeline) SetSpeakerActive(ts time.Time, name string, active bool) {
+	if name == "" {
+		return
+	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.changes = append(t.changes, SpeakerChange{Time: ts, Name: name})
+	t.changes = append(t.changes, SpeakerChange{Time: ts, Name: name, Active: active})
+	t.evict()
+}
+
+// SetActive records the full active speaker set at the given timestamp.
+func (t *SpeakerTimeline) SetActive(ts time.Time, active map[string]struct{}) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	current := t.activeAtLocked(ts)
+	for name := range current {
+		if _, ok := active[name]; !ok {
+			t.changes = append(t.changes, SpeakerChange{Time: ts, Name: name, Active: false})
+		}
+	}
+
+	names := make([]string, 0, len(active))
+	for name := range active {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if _, ok := current[name]; !ok {
+			t.changes = append(t.changes, SpeakerChange{Time: ts, Name: name, Active: true})
+		}
+	}
+
 	t.evict()
 }
 
@@ -40,61 +83,14 @@ type SpeakerDuration struct {
 // SpeakersInWithDurations returns speakers active during [start, end], ordered
 // by total speaking time (dominant speaker first), with durations included.
 func (t *SpeakerTimeline) SpeakersInWithDurations(start, end time.Time) []SpeakerDuration {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	type span struct {
-		name      string
-		spanStart time.Time
-		spanEnd   time.Time
+	attribution := t.Coverage(start, end, SpeakerLookupOptions{})
+	entries := make([]SpeakerDuration, 0, len(attribution.Candidates))
+	for _, candidate := range attribution.Candidates {
+		entries = append(entries, SpeakerDuration{
+			Name:     candidate.Name,
+			Duration: candidate.Coverage,
+		})
 	}
-
-	activeSet := make(map[string]time.Time)
-	var spans []span
-
-	for _, c := range t.changes {
-		if c.Time.After(end) {
-			break
-		}
-		if !c.Time.After(start) {
-			if c.Name != "" {
-				activeSet[c.Name] = start
-			} else {
-				activeSet = make(map[string]time.Time)
-			}
-		} else {
-			if c.Name != "" {
-				activeSet[c.Name] = c.Time
-			} else {
-				for name, spanStart := range activeSet {
-					spans = append(spans, span{name: name, spanStart: spanStart, spanEnd: c.Time})
-				}
-				activeSet = make(map[string]time.Time)
-			}
-		}
-	}
-
-	for name, spanStart := range activeSet {
-		spans = append(spans, span{name: name, spanStart: spanStart, spanEnd: end})
-	}
-
-	durations := make(map[string]time.Duration)
-	for _, s := range spans {
-		durations[s.name] += s.spanEnd.Sub(s.spanStart)
-	}
-
-	entries := make([]SpeakerDuration, 0, len(durations))
-	for name, dur := range durations {
-		entries = append(entries, SpeakerDuration{name, dur})
-	}
-	for i := range entries {
-		for j := i + 1; j < len(entries); j++ {
-			if entries[j].Duration > entries[i].Duration {
-				entries[i], entries[j] = entries[j], entries[i]
-			}
-		}
-	}
-
 	return entries
 }
 
@@ -107,6 +103,79 @@ func (t *SpeakerTimeline) SpeakersIn(start, end time.Time) []string {
 		result[i] = e.Name
 	}
 	return result
+}
+
+// SpeakerLookupOptions controls percentage-based speaker attribution.
+type SpeakerLookupOptions struct {
+	MinCandidatePct      float64
+	MinCandidateDuration time.Duration
+}
+
+// SpeakerCandidate is one active speaker observed in a lookup window.
+type SpeakerCandidate struct {
+	Name        string
+	Coverage    time.Duration
+	CoveragePct float64
+}
+
+// SpeakerAttribution is the ranked speaker coverage for a lookup window.
+type SpeakerAttribution struct {
+	Candidates []SpeakerCandidate
+}
+
+// Coverage returns active speakers in [start, end], ranked by coverage percentage.
+func (t *SpeakerTimeline) Coverage(start, end time.Time, opts SpeakerLookupOptions) SpeakerAttribution {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if !end.After(start) {
+		return SpeakerAttribution{}
+	}
+
+	window := end.Sub(start)
+	active := make(map[string]struct{})
+	coverage := make(map[string]time.Duration)
+	cursor := start
+
+	for _, c := range t.changes {
+		if !c.Time.After(start) {
+			applyChange(active, c)
+			continue
+		}
+		if c.Time.After(end) {
+			break
+		}
+		addCoverage(coverage, active, c.Time.Sub(cursor))
+		applyChange(active, c)
+		cursor = c.Time
+	}
+	addCoverage(coverage, active, end.Sub(cursor))
+
+	candidates := make([]SpeakerCandidate, 0, len(coverage))
+	for name, duration := range coverage {
+		pct := duration.Seconds() / window.Seconds()
+		if duration < opts.MinCandidateDuration {
+			continue
+		}
+		if pct+floatEpsilon < opts.MinCandidatePct {
+			continue
+		}
+		candidates = append(candidates, SpeakerCandidate{
+			Name:        name,
+			Coverage:    duration,
+			CoveragePct: pct,
+		})
+	}
+	slices.SortFunc(candidates, func(a, b SpeakerCandidate) int {
+		if diff := b.Coverage - a.Coverage; diff != 0 {
+			if diff > 0 {
+				return 1
+			}
+			return -1
+		}
+		return stringsCompare(a.Name, b.Name)
+	})
+	return SpeakerAttribution{Candidates: candidates}
 }
 
 func (t *SpeakerTimeline) evict() {
@@ -128,50 +197,47 @@ func (t *SpeakerTimeline) evict() {
 	}
 }
 
-// ParticipantSet tracks unique participant names with change detection.
-type ParticipantSet struct {
-	mu    sync.Mutex
-	names map[string]struct{}
-}
+const floatEpsilon = 1e-9
 
-// NewParticipantSet creates an empty participant set.
-func NewParticipantSet() *ParticipantSet {
-	return &ParticipantSet{names: make(map[string]struct{})}
-}
-
-// Update adds names to the set and returns only newly seen names.
-func (p *ParticipantSet) Update(names map[string]struct{}) map[string]struct{} {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	newNames := make(map[string]struct{})
-	for name := range names {
-		if _, exists := p.names[name]; !exists {
-			newNames[name] = struct{}{}
-			p.names[name] = struct{}{}
+func (t *SpeakerTimeline) activeAtLocked(ts time.Time) map[string]struct{} {
+	active := make(map[string]struct{})
+	for _, c := range t.changes {
+		if c.Time.After(ts) {
+			break
 		}
+		applyChange(active, c)
 	}
-	if len(newNames) == 0 {
-		return nil
-	}
-	return newNames
+	return active
 }
 
-// GetAll returns a copy of all known participant names.
-func (p *ParticipantSet) GetAll() map[string]struct{} {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	result := make(map[string]struct{}, len(p.names))
-	for name := range p.names {
-		result[name] = struct{}{}
+func applyChange(active map[string]struct{}, c SpeakerChange) {
+	if c.Name == "" && !c.Active {
+		clear(active)
+		return
 	}
-	return result
+	if c.Active {
+		active[c.Name] = struct{}{}
+	} else {
+		delete(active, c.Name)
+	}
 }
 
-// Reset clears all tracked participants.
-func (p *ParticipantSet) Reset() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.names = make(map[string]struct{})
+func addCoverage(coverage map[string]time.Duration, active map[string]struct{}, duration time.Duration) {
+	if duration <= 0 {
+		return
+	}
+	for name := range active {
+		coverage[name] += duration
+	}
+}
+
+func stringsCompare(a, b string) int {
+	switch {
+	case a < b:
+		return -1
+	case a > b:
+		return 1
+	default:
+		return 0
+	}
 }

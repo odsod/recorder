@@ -10,6 +10,7 @@ import (
 	"github.com/odsod/recorder/internal/lock"
 	"github.com/odsod/recorder/internal/segment"
 	"github.com/odsod/recorder/internal/signals"
+	"github.com/odsod/recorder/internal/speech"
 	"github.com/odsod/recorder/internal/timeline"
 	"github.com/odsod/recorder/internal/transcript"
 )
@@ -30,6 +31,7 @@ type Recorder struct {
 	meetingState    *timeline.MeetingState
 	silenceMonitor  *signals.SilenceMonitor
 	segmenter       *segment.IncrementalSegmenter
+	speechEmitter   *speech.Emitter
 	lastSystemText  string
 	chunkNum        int
 	lastFlushedTime time.Time
@@ -50,6 +52,19 @@ func New(ctx context.Context, cfg config.Config, svc Services) (*Recorder, error
 		meetingState:    timeline.NewMeetingState(),
 		silenceMonitor:  signals.NewSilenceMonitor(cfg.Signals.SilenceThresholdS),
 		lastPplSet:      make(map[string]struct{}),
+	}
+	r.speechEmitter = &speech.Emitter{
+		Cleaner:       svc.Cleaner,
+		SpeakerLookup: r.speakerTimeline,
+		Participants:  r.currentParticipants,
+		Deduper: speech.NearbyDeduper{
+			Threshold: cfg.Dedup.Threshold,
+			Tolerance: 5 * time.Second,
+		},
+		LookupOptions: timeline.SpeakerLookupOptions{
+			MinCandidatePct:      minSpeakerCandidatePct,
+			MinCandidateDuration: minSpeakerCandidateDuration,
+		},
 	}
 
 	r.segmenter = segment.NewSegmenter(ctx, svc.SegmentHandler, func(e transcript.Event) {

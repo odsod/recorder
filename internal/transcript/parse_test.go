@@ -84,3 +84,21 @@ func TestParse_SkipsInvalidLines(t *testing.T) {
 		t.Fatalf("parsed %d events, want 1", len(got.Events))
 	}
 }
+
+func TestParse_SpeakerPercentages(t *testing.T) {
+	got, err := Parse([]byte("[09:00:00] 🔊 **sys** [Alice 55% / Bob 35%] hello\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(got.Events) != 1 {
+		t.Fatalf("parsed %d events, want 1", len(got.Events))
+	}
+	e := got.Events[0]
+	if e.Speaker != "Alice 55% / Bob 35%" {
+		t.Fatalf("Speaker = %q", e.Speaker)
+	}
+	if e.Text != "hello" {
+		t.Fatalf("Text = %q", e.Text)
+	}
+}

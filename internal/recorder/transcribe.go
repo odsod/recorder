@@ -2,16 +2,20 @@ package recorder
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"maps"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/odsod/recorder/internal/protocol/whisper"
-	"github.com/odsod/recorder/internal/timeline"
-	"github.com/odsod/recorder/internal/transcribe"
+	"github.com/odsod/recorder/internal/speech"
 	"github.com/odsod/recorder/internal/transcript"
+)
+
+const (
+	minSpeakerCandidatePct      = 0.05
+	minSpeakerCandidateDuration = 250 * time.Millisecond
 )
 
 func (r *Recorder) transcriptionWorker(ctx context.Context, chunkCh <-chan AudioChunk) {
@@ -43,109 +47,35 @@ func (r *Recorder) transcribeChunk(ctx context.Context, chunk AudioChunk) {
 		)
 	}
 
-	sysText := sysResp.Text
-	micText := micResp.Text
-
 	r.flushSignalEvents(ctx, chunk.StartTime, chunk.EndTime)
 
-	speakers := r.speakerTimeline.SpeakersInWithDurations(chunk.StartTime, chunk.EndTime)
-	speaker := attributeSpeaker(speakers, r.cfg.Speaker.AmbiguityRatio)
-	participants := r.currentParticipants()
+	sysSegments := speech.FromWhisper(sysResp, chunk.StartTime, chunk.EndTime)
+	micSegments := speech.FromWhisper(micResp, chunk.StartTime, chunk.EndTime)
 
-	switch {
-	case sysText != "":
-		cleaned, err := r.svc.Cleaner.Cleanup(ctx, sysText, participants)
-		if err != nil {
-			slog.ErrorContext(ctx, "cleanup sys failed",
-				"err", err,
-			)
-		}
-		if cleaned == "" {
-			cleaned = sysText
-		}
-		if cleaned != "" {
-			e := transcript.Event{
-				Time:    chunk.StartTime,
-				Type:    transcript.Speech,
-				Source:  "sys",
-				Text:    cleaned,
-				Speaker: speaker,
-			}
-			r.appendEvent(ctx, e)
-			r.lastSystemText = cleaned
-			r.segmenter.OnSpeech(e)
+	priorSystemText := r.lastSystemText
+	sysEvents, err := r.speechEmitter.Emit(ctx, "sys", sysSegments, nil)
+	if err != nil {
+		slog.ErrorContext(ctx, "emit sys speech failed", "err", err)
+	}
+	r.appendSpeechEvents(ctx, sysEvents)
+	if len(sysEvents) > 0 {
+		r.lastSystemText = joinEventText(sysEvents)
+	}
 
-			if micText != "" && !transcribe.TextsOverlap(cleaned, micText, r.cfg.Dedup.Threshold) {
-				micCleaned, err := r.svc.Cleaner.Cleanup(ctx, micText, participants)
-				if err != nil {
-					slog.ErrorContext(ctx, "cleanup mic failed",
-						"err", err,
-					)
-				}
-				if micCleaned == "" {
-					micCleaned = micText
-				}
-				if micCleaned != "" {
-					me := transcript.Event{
-						Time:    chunk.StartTime,
-						Type:    transcript.Speech,
-						Source:  "mic",
-						Text:    micCleaned,
-						Speaker: speaker,
-					}
-					r.appendEvent(ctx, me)
-					r.segmenter.OnSpeech(me)
-				}
-			}
-		}
-	case micText != "":
-		if r.lastSystemText != "" && transcribe.TextsOverlap(r.lastSystemText, micText, r.cfg.Dedup.Threshold) {
-			slog.InfoContext(ctx, "mic deduped",
-				"text", truncate(micText, 60),
-			)
-		} else {
-			cleaned, err := r.svc.Cleaner.Cleanup(ctx, micText, participants)
-			if err != nil {
-				slog.ErrorContext(ctx, "cleanup mic failed",
-					"err", err,
-				)
-			}
-			if cleaned == "" {
-				cleaned = micText
-			}
-			if cleaned != "" {
-				e := transcript.Event{
-					Time:    chunk.StartTime,
-					Type:    transcript.Speech,
-					Source:  "mic",
-					Text:    cleaned,
-					Speaker: speaker,
-				}
-				r.appendEvent(ctx, e)
-				r.segmenter.OnSpeech(e)
-			}
-		}
-	default:
+	micDedupEvents := sysEvents
+	if len(micDedupEvents) == 0 && priorSystemText != "" {
+		micDedupEvents = []transcript.Event{{Time: chunk.StartTime, Text: priorSystemText}}
+	}
+	micEvents, err := r.speechEmitter.Emit(ctx, "mic", micSegments, micDedupEvents)
+	if err != nil {
+		slog.ErrorContext(ctx, "emit mic speech failed", "err", err)
+	}
+	r.appendSpeechEvents(ctx, micEvents)
+
+	if len(sysSegments) == 0 && len(micSegments) == 0 {
 		slog.InfoContext(ctx, "no speech detected")
 	}
 	slog.InfoContext(ctx, "listening")
-}
-
-func attributeSpeaker(speakers []timeline.SpeakerDuration, ambiguityRatio float64) string {
-	switch {
-	case len(speakers) == 0:
-		return ""
-	case len(speakers) == 1:
-		return speakers[0].Name
-	default:
-		if float64(speakers[1].Duration) >= float64(speakers[0].Duration)*ambiguityRatio {
-			total := speakers[0].Duration + speakers[1].Duration
-			pct0 := int(float64(speakers[0].Duration) * 100 / float64(total))
-			pct1 := 100 - pct0
-			return fmt.Sprintf("%s(%d%%),%s(%d%%)", speakers[0].Name, pct0, speakers[1].Name, pct1)
-		}
-		return speakers[0].Name
-	}
 }
 
 func (r *Recorder) currentParticipants() []string {
@@ -154,6 +84,23 @@ func (r *Recorder) currentParticipants() []string {
 		return nil
 	}
 	return slices.Sorted(maps.Keys(all))
+}
+
+func joinEventText(events []transcript.Event) string {
+	parts := make([]string, 0, len(events))
+	for _, e := range events {
+		if e.Text != "" {
+			parts = append(parts, e.Text)
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+func (r *Recorder) appendSpeechEvents(ctx context.Context, events []transcript.Event) {
+	for _, e := range events {
+		r.appendEvent(ctx, e)
+		r.segmenter.OnSpeech(e)
+	}
 }
 
 func (r *Recorder) flushSignalEvents(ctx context.Context, start, end time.Time) {

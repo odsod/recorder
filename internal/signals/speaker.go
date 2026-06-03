@@ -30,10 +30,6 @@ type SpeakerPoller interface {
 	Poll(ctx context.Context) (PollResult, error)
 }
 
-// flickerFilterTicks requires a speaker to be seen speaking for this many
-// consecutive polls before being recorded in the timeline.
-const flickerFilterTicks = 2
-
 // RunSpeakerCollector polls CDP and updates speaker and meeting timelines.
 func RunSpeakerCollector(
 	ctx context.Context,
@@ -42,11 +38,9 @@ func RunSpeakerCollector(
 	participantSet *timeline.ParticipantSet,
 	meetingState *timeline.MeetingState,
 ) {
-	activeSpeakers := make(map[string]struct{})
-	// Track consecutive speaking ticks per participant for flicker filtering.
-	speakingTicks := make(map[string]int)
+	tracker := NewSpeakerTracker(DefaultSpeakerTrackerConfig())
 
-	ticker := time.NewTicker(1 * time.Second)
+	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
 
 	for {
@@ -72,8 +66,8 @@ func RunSpeakerCollector(
 					slog.InfoContext(ctx, "meeting ended")
 				}
 				participantSet.Reset()
-				activeSpeakers = make(map[string]struct{})
-				speakingTicks = make(map[string]int)
+				tracker = NewSpeakerTracker(DefaultSpeakerTrackerConfig())
+				speakerTimeline.Append(time.Now(), "")
 			}
 
 			if result.Participants == nil {
@@ -87,35 +81,18 @@ func RunSpeakerCollector(
 			}
 			participantSet.Update(names)
 
-			currentSpeaking := make(map[string]struct{})
-			for _, s := range result.Participants {
-				if s.Speaking {
-					speakingTicks[s.Name]++
-					if speakingTicks[s.Name] >= flickerFilterTicks {
-						currentSpeaking[s.Name] = struct{}{}
-					}
-				} else {
-					speakingTicks[s.Name] = 0
-				}
-			}
-
-			for name := range currentSpeaking {
-				if _, was := activeSpeakers[name]; !was {
+			for _, transition := range tracker.Observe(now, result.Participants) {
+				speakerTimeline.SetSpeakerActive(transition.Time, transition.Name, transition.Active)
+				if transition.Active {
 					slog.InfoContext(ctx, "speaker started",
-						"name", name,
+						"name", transition.Name,
 					)
-					speakerTimeline.Append(now, name)
-				}
-			}
-			for name := range activeSpeakers {
-				if _, is := currentSpeaking[name]; !is {
+				} else {
 					slog.InfoContext(ctx, "speaker stopped",
-						"name", name,
+						"name", transition.Name,
 					)
-					speakerTimeline.Append(now, "")
 				}
 			}
-			activeSpeakers = currentSpeaking
 		}
 	}
 }
