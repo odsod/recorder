@@ -22,20 +22,20 @@ const (
 
 // Recorder orchestrates audio capture, transcription, and segmentation.
 type Recorder struct {
-	cfg             config.Config
-	svc             Services
-	transcript      *TranscriptWriter
-	lk              *lock.RecorderLock
-	speakerTimeline *timeline.SpeakerTimeline
-	participantSet  *timeline.ParticipantSet
-	meetingState    *timeline.MeetingState
-	silenceMonitor  *signals.SilenceMonitor
-	segmenter       *segment.IncrementalSegmenter
-	speechEmitter   *speech.Emitter
-	lastSystemText  string
-	chunkNum        int
-	lastFlushedTime time.Time
-	lastPplSet      map[string]struct{}
+	cfg              config.Config
+	svc              Services
+	transcript       *TranscriptWriter
+	lk               *lock.RecorderLock
+	speakerTimeline  *timeline.SpeakerTimeline
+	participantSet   *timeline.ParticipantSet
+	meetingState     *timeline.MeetingState
+	silenceMonitor   *signals.SilenceMonitor
+	segmenter        *segment.IncrementalSegmenter
+	speechEmitter    *speech.Emitter
+	chunkTranscriber *ChunkTranscriber
+	chunkNum         int
+	lastFlushedTime  time.Time
+	lastPplSet       map[string]struct{}
 }
 
 // New creates a Recorder with the given config and services.
@@ -65,6 +65,10 @@ func New(ctx context.Context, cfg config.Config, svc Services) (*Recorder, error
 			MinCandidatePct:      minSpeakerCandidatePct,
 			MinCandidateDuration: minSpeakerCandidateDuration,
 		},
+	}
+	r.chunkTranscriber = &ChunkTranscriber{
+		Transcriber:   svc.Transcriber,
+		SpeechEmitter: r.speechEmitter,
 	}
 
 	r.segmenter = segment.NewSegmenter(ctx, svc.SegmentHandler, func(e transcript.Event) {

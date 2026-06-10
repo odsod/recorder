@@ -5,11 +5,8 @@ import (
 	"log/slog"
 	"maps"
 	"slices"
-	"strings"
 	"time"
 
-	"github.com/odsod/recorder/internal/protocol/whisper"
-	"github.com/odsod/recorder/internal/speech"
 	"github.com/odsod/recorder/internal/transcript"
 )
 
@@ -30,49 +27,30 @@ func (r *Recorder) transcriptionWorker(ctx context.Context, chunkCh <-chan Audio
 }
 
 func (r *Recorder) transcribeChunk(ctx context.Context, chunk AudioChunk) {
-	sysResp, err := r.svc.Transcriber.Transcribe(ctx, whisper.TranscribeRequest{
-		WAVData: chunk.SysWAV, Filename: "sys.wav",
-	})
-	if err != nil {
+	result := r.chunkTranscriber.Transcribe(ctx, chunk)
+	if result.SystemTranscribeErr != nil {
 		slog.ErrorContext(ctx, "transcribe sys failed",
-			"err", err,
+			"err", result.SystemTranscribeErr,
 		)
 	}
-	micResp, err := r.svc.Transcriber.Transcribe(ctx, whisper.TranscribeRequest{
-		WAVData: chunk.MicWAV, Filename: "mic.wav",
-	})
-	if err != nil {
+	if result.MicTranscribeErr != nil {
 		slog.ErrorContext(ctx, "transcribe mic failed",
-			"err", err,
+			"err", result.MicTranscribeErr,
 		)
 	}
 
 	r.flushSignalEvents(ctx, chunk.StartTime, chunk.EndTime)
 
-	sysSegments := speech.FromWhisper(sysResp, chunk.StartTime, chunk.EndTime)
-	micSegments := speech.FromWhisper(micResp, chunk.StartTime, chunk.EndTime)
+	if result.SystemEmitErr != nil {
+		slog.ErrorContext(ctx, "emit sys speech failed", "err", result.SystemEmitErr)
+	}
+	r.appendSpeechEvents(ctx, result.SystemEvents)
+	if result.MicEmitErr != nil {
+		slog.ErrorContext(ctx, "emit mic speech failed", "err", result.MicEmitErr)
+	}
+	r.appendSpeechEvents(ctx, result.MicEvents)
 
-	priorSystemText := r.lastSystemText
-	sysEvents, err := r.speechEmitter.Emit(ctx, "sys", sysSegments, nil)
-	if err != nil {
-		slog.ErrorContext(ctx, "emit sys speech failed", "err", err)
-	}
-	r.appendSpeechEvents(ctx, sysEvents)
-	if len(sysEvents) > 0 {
-		r.lastSystemText = joinEventText(sysEvents)
-	}
-
-	micDedupEvents := sysEvents
-	if len(micDedupEvents) == 0 && priorSystemText != "" {
-		micDedupEvents = []transcript.Event{{Time: chunk.StartTime, Text: priorSystemText}}
-	}
-	micEvents, err := r.speechEmitter.Emit(ctx, "mic", micSegments, micDedupEvents)
-	if err != nil {
-		slog.ErrorContext(ctx, "emit mic speech failed", "err", err)
-	}
-	r.appendSpeechEvents(ctx, micEvents)
-
-	if len(sysSegments) == 0 && len(micSegments) == 0 {
+	if result.NoSpeech() {
 		slog.InfoContext(ctx, "no speech detected")
 	}
 	slog.InfoContext(ctx, "listening")
@@ -84,16 +62,6 @@ func (r *Recorder) currentParticipants() []string {
 		return nil
 	}
 	return slices.Sorted(maps.Keys(all))
-}
-
-func joinEventText(events []transcript.Event) string {
-	parts := make([]string, 0, len(events))
-	for _, e := range events {
-		if e.Text != "" {
-			parts = append(parts, e.Text)
-		}
-	}
-	return strings.Join(parts, " ")
 }
 
 func (r *Recorder) appendSpeechEvents(ctx context.Context, events []transcript.Event) {
