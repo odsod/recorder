@@ -38,7 +38,13 @@ func RunSpeakerCollector(
 	participantSet *timeline.ParticipantSet,
 	meetingState *timeline.MeetingState,
 ) {
-	tracker := NewSpeakerTracker(DefaultSpeakerTrackerConfig())
+	collector := &SpeakerCollector{
+		Detector: detector,
+		Tracker:  NewSpeakerTracker(DefaultSpeakerTrackerConfig()),
+		Timeline: speakerTimeline,
+		People:   participantSet,
+		Meetings: meetingState,
+	}
 
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
@@ -48,50 +54,10 @@ func RunSpeakerCollector(
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			result, err := detector.Poll(ctx)
-			if err != nil {
+			if err := collector.PollOnce(ctx, time.Now()); err != nil {
 				slog.ErrorContext(ctx, "cdp poll failed",
 					"err", err,
 				)
-				continue
-			}
-
-			if result.MeetingChange != nil {
-				meetingState.Set(result.MeetingChange.Title)
-				if result.MeetingChange.Title != "" {
-					slog.InfoContext(ctx, "meeting joined",
-						"title", result.MeetingChange.Title,
-					)
-				} else {
-					slog.InfoContext(ctx, "meeting ended")
-				}
-				participantSet.Reset()
-				tracker = NewSpeakerTracker(DefaultSpeakerTrackerConfig())
-				speakerTimeline.Append(time.Now(), "")
-			}
-
-			if result.Participants == nil {
-				continue
-			}
-
-			now := time.Now()
-			names := make(map[string]struct{})
-			for _, s := range result.Participants {
-				names[s.Name] = struct{}{}
-			}
-			participantSet.Update(names)
-
-			for _, transition := range tracker.Observe(now, result.Participants) {
-				speakerTimeline.SetSpeakerActive(transition.Time, transition.Name, transition.Active)
-				if transition.Active {
-					slog.InfoContext(ctx, "speaker started",
-						"name", transition.Name,
-					)
-				} else {
-					slog.InfoContext(ctx, "speaker stopped",
-						"name", transition.Name,
-					)
-				}
 			}
 		}
 	}
