@@ -1,5 +1,54 @@
 # Recorder Roadmap
 
+## Current Status
+
+### Completed Foundation
+
+- Whisper `verbose_json` request and segment parsing
+- Absolute-time speech segment normalization in `internal/speech`
+- Segment-level speech emitter:
+  - cleanup
+  - speaker attribution lookup
+  - mic/system dedup
+  - transcript event construction
+- Speaker attribution formatting in `internal/speech`
+- Ranked speaker coverage API in `internal/timeline`
+- Debounced speaker tracker and `SpeakerCollector.PollOnce`
+- Chunk transcription orchestration in `internal/recorder`
+- System dedup reference tracking in `internal/speech`
+
+### Work To Be Done
+
+- Live validation:
+  - run recorder in Google Meet and Teams
+  - confirm long chunks emit multiple transcript events
+  - confirm back-and-forth speech gets segment-level speaker attribution
+  - confirm ambiguous attribution is useful in real meetings
+  - confirm no stale speaker carry-over across meeting/tab changes
+- Diagnostics:
+  - keep stdout on `slog.TextHandler` for human-readable daemon watching
+  - mirror logs to configured JSONL file with `slog.JSONHandler` for agent review
+  - use `slog.NewMultiHandler` when file logging is enabled
+  - log debounced speaker transitions
+  - log segment attribution decisions at debug level
+  - include chunk number, segment window, candidates, and thresholds
+  - avoid raw poll-sample logs by default
+- Cleanup quality:
+  - compare per-segment cleanup with prior chunk-level cleanup
+  - keep per-segment cleanup unless quality noticeably regresses
+  - design segment-preserving cleanup only if needed
+- Dedup tuning:
+  - validate mic/system dedup threshold against real overlap
+  - check prior-system fallback behavior after silent system chunks
+  - keep threshold changes separate from structural refactors
+- Test hardening:
+  - add end-to-end recorder orchestration coverage for one chunk producing multiple events
+  - add stale-speaker regression coverage across meeting changes
+  - add realistic mixed-speaker transcript fixture coverage
+- Roadmap cleanup:
+  - archive completed implementation notes after live validation
+  - keep this file focused on remaining decisions and risk
+
 ## Speaker Attribution Improvements
 
 ### Goals
