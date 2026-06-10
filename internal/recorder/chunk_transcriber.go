@@ -3,7 +3,6 @@ package recorder
 import (
 	"context"
 	"errors"
-	"strings"
 
 	"github.com/odsod/recorder/internal/protocol/whisper"
 	"github.com/odsod/recorder/internal/speech"
@@ -25,7 +24,7 @@ type ChunkTranscriber struct {
 	Transcriber   Transcriber
 	SpeechEmitter SpeechEmitter
 
-	lastSystemText string
+	SystemRefs speech.SystemReferenceTracker
 }
 
 // ChunkTranscription contains the speech events and errors produced for one chunk.
@@ -69,16 +68,9 @@ func (t *ChunkTranscriber) Transcribe(ctx context.Context, chunk AudioChunk) Chu
 	out.SystemSpeechDetected = len(sysSegments) > 0
 	out.MicSpeechDetected = len(micSegments) > 0
 
-	priorSystemText := t.lastSystemText
 	out.SystemEvents, out.SystemEmitErr = t.SpeechEmitter.Emit(ctx, "sys", sysSegments, nil)
-	if len(out.SystemEvents) > 0 {
-		t.lastSystemText = joinEventText(out.SystemEvents)
-	}
-
-	micDedupEvents := out.SystemEvents
-	if len(micDedupEvents) == 0 && priorSystemText != "" {
-		micDedupEvents = []transcript.Event{{Time: chunk.StartTime, Text: priorSystemText}}
-	}
+	micDedupEvents := t.SystemRefs.MicRefs(chunk.StartTime, out.SystemEvents)
+	t.SystemRefs.Update(out.SystemEvents)
 	out.MicEvents, out.MicEmitErr = t.SpeechEmitter.Emit(ctx, "mic", micSegments, micDedupEvents)
 
 	out.Err = errors.Join(
@@ -88,14 +80,4 @@ func (t *ChunkTranscriber) Transcribe(ctx context.Context, chunk AudioChunk) Chu
 		out.MicEmitErr,
 	)
 	return out
-}
-
-func joinEventText(events []transcript.Event) string {
-	parts := make([]string, 0, len(events))
-	for _, e := range events {
-		if e.Text != "" {
-			parts = append(parts, e.Text)
-		}
-	}
-	return strings.Join(parts, " ")
 }
