@@ -51,8 +51,8 @@ func TestEmitter_AttachesSpeakerPercentages(t *testing.T) {
 	start := time.Date(2026, 6, 3, 9, 0, 0, 0, time.UTC)
 	lookup := staticSpeakerLookup{attribution: timeline.SpeakerAttribution{
 		Candidates: []timeline.SpeakerCandidate{
-			{Name: "Alice", CoveragePct: 0.55},
-			{Name: "Bob", CoveragePct: 0.09},
+			{Name: "Alice", CoveragePct: 0.75},
+			{Name: "Bob", CoveragePct: 0.25},
 		},
 	}}
 	emitter := Emitter{Cleaner: identityCleaner{}, SpeakerLookup: lookup}
@@ -63,8 +63,81 @@ func TestEmitter_AttachesSpeakerPercentages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
-	if got[0].Speaker != "Alice 55% / Bob 9%" {
+	if got[0].Speaker != "Alice 75% / Bob 25%" {
 		t.Fatalf("speaker = %q", got[0].Speaker)
+	}
+}
+
+func TestEmitter_SysFiltersSoleOwner(t *testing.T) {
+	start := time.Date(2026, 6, 3, 9, 0, 0, 0, time.UTC)
+	lookup := staticSpeakerLookup{attribution: timeline.SpeakerAttribution{
+		Candidates: []timeline.SpeakerCandidate{
+			{Name: "Oscar", CoveragePct: 1.0},
+		},
+	}}
+	emitter := Emitter{
+		Cleaner:       identityCleaner{},
+		SpeakerLookup: lookup,
+		OwnerName:     "Oscar",
+	}
+
+	got, err := emitter.Emit(context.Background(), "sys", []Segment{
+		{Start: start, End: start.Add(time.Second), Text: "hello"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if got[0].Speaker != "" {
+		t.Fatalf("speaker = %q, want empty (owner filtered on sys)", got[0].Speaker)
+	}
+}
+
+func TestEmitter_SysKeepsOwnerWithOthers(t *testing.T) {
+	start := time.Date(2026, 6, 3, 9, 0, 0, 0, time.UTC)
+	lookup := staticSpeakerLookup{attribution: timeline.SpeakerAttribution{
+		Candidates: []timeline.SpeakerCandidate{
+			{Name: "Alice", CoveragePct: 0.8},
+			{Name: "Oscar", CoveragePct: 0.5},
+		},
+	}}
+	emitter := Emitter{
+		Cleaner:       identityCleaner{},
+		SpeakerLookup: lookup,
+		OwnerName:     "Oscar",
+	}
+
+	got, err := emitter.Emit(context.Background(), "sys", []Segment{
+		{Start: start, End: start.Add(time.Second), Text: "hello"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if got[0].Speaker != "Alice" {
+		t.Fatalf("speaker = %q, want just Alice (owner filtered on sys)", got[0].Speaker)
+	}
+}
+
+func TestEmitter_MicKeepsOwner(t *testing.T) {
+	start := time.Date(2026, 6, 3, 9, 0, 0, 0, time.UTC)
+	lookup := staticSpeakerLookup{attribution: timeline.SpeakerAttribution{
+		Candidates: []timeline.SpeakerCandidate{
+			{Name: "Oscar", CoveragePct: 1.0},
+		},
+	}}
+	emitter := Emitter{
+		Cleaner:       identityCleaner{},
+		SpeakerLookup: lookup,
+		OwnerName:     "Oscar",
+	}
+
+	got, err := emitter.Emit(context.Background(), "mic", []Segment{
+		{Start: start, End: start.Add(time.Second), Text: "hello"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if got[0].Speaker != "Oscar" {
+		t.Fatalf("speaker = %q, want Oscar (owner kept on mic)", got[0].Speaker)
 	}
 }
 

@@ -42,6 +42,7 @@ type SignalsConfig struct {
 
 // SpeakerConfig holds speaker attribution settings.
 type SpeakerConfig struct {
+	Self           string  `json:"self"`
 	AmbiguityRatio float64 `json:"ambiguityRatio"`
 }
 

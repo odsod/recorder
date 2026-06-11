@@ -29,6 +29,7 @@ type Emitter struct {
 	Deduper       Deduper
 	Participants  ParticipantProvider
 	LookupOptions timeline.SpeakerLookupOptions
+	OwnerName     string
 }
 
 // Emit cleans, attributes, and deduplicates segments without writing them.
@@ -61,11 +62,15 @@ func (e *Emitter) Emit(
 
 		speaker := ""
 		if e.SpeakerLookup != nil {
-			speaker = FormatAttribution(e.SpeakerLookup.Coverage(
+			attr := e.SpeakerLookup.Coverage(
 				segment.Start,
 				segment.End,
 				e.LookupOptions,
-			))
+			)
+			if source == "sys" && e.OwnerName != "" {
+				attr = filterOwner(attr, e.OwnerName)
+			}
+			speaker = FormatAttribution(attr)
 		}
 
 		emitted = append(emitted, transcript.Event{
