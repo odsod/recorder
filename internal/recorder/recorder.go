@@ -65,6 +65,7 @@ func New(ctx context.Context, cfg config.Config, svc Services) (*Recorder, error
 			MinCandidatePct:      minSpeakerCandidatePct,
 			MinCandidateDuration: minSpeakerCandidateDuration,
 		},
+		OwnerName: cfg.Speaker.Self,
 	}
 	r.chunkTranscriber = &ChunkTranscriber{
 		Transcriber:   svc.Transcriber,

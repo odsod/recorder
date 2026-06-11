@@ -172,6 +172,7 @@ mise run install        # build + install binary to ~/.local/bin
   "transcript": { "outputDir": "~/.local/share/recorder/transcripts" },
   "segments": { "outputDir": "~/.local/share/recorder/segments" },
   "dedup": { "threshold": 0.6 },
+  "speaker": { "self": "Oscar Söderlund" },
   "signals": {
     "silenceThresholdS": 180,
     "cdpPorts": [9222]
@@ -277,14 +278,14 @@ The detector uses a two-phase approach to find the CSS class that indicates spea
 ### Ambiguous Attribution
 
 When a chunk's time window contains multiple speakers with similar speaking time,
-the transcription worker double-attributes with percentages rather than picking a
+the transcription worker multi-attributes with relative percentages rather than picking a
 single (potentially wrong) dominant speaker.
 
 - **Heuristic**: if second speaker's duration ≥ 5% of first speaker's → ambiguous
-- **Format**: `[Alice(70%),Bob(30%)]` — percentages of the two speakers' combined time
-- **Unambiguous**: plain `[Alice]` (no percentage) when single speaker or second is < 30%
-- **Cap**: max 2 speakers attributed per line
-- **Rationale**: short phrases from a new speaker often get misattributed to the previous longer speaker; double-attribution preserves information for downstream summarizers
+- **Format**: `[Alice 70% / Bob 30%]` — relative percentages summing to ~100%
+- **Unambiguous**: plain `[Alice]` (no percentage) when single speaker
+- **Owner filtering**: on sys channel, owner is removed from attribution (mic bleed). Configured via `speaker.self`
+- **Rationale**: short phrases from a new speaker often get misattributed to the previous longer speaker; multi-attribution preserves information for downstream summarizers
 
 ## Lockfile
 
