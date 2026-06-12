@@ -141,6 +141,26 @@ func TestEmitter_MicKeepsOwner(t *testing.T) {
 	}
 }
 
+func TestEmitter_MicDefaultsToSelfWhenNoSpeaker(t *testing.T) {
+	start := time.Date(2026, 6, 3, 9, 0, 0, 0, time.UTC)
+	lookup := staticSpeakerLookup{attribution: timeline.SpeakerAttribution{}}
+	emitter := Emitter{
+		Cleaner:       identityCleaner{},
+		SpeakerLookup: lookup,
+		OwnerName:     "Oscar",
+	}
+
+	got, err := emitter.Emit(context.Background(), "mic", []Segment{
+		{Start: start, End: start.Add(time.Second), Text: "hello"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if got[0].Speaker != "Oscar" {
+		t.Fatalf("speaker = %q, want Oscar (mic defaults to self)", got[0].Speaker)
+	}
+}
+
 func TestEmitter_MicDuplicateSkipped(t *testing.T) {
 	start := time.Date(2026, 6, 3, 9, 0, 0, 0, time.UTC)
 	emitter := Emitter{
