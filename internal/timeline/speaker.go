@@ -109,6 +109,7 @@ func (t *SpeakerTimeline) SpeakersIn(start, end time.Time) []string {
 type SpeakerLookupOptions struct {
 	MinCandidatePct      float64
 	MinCandidateDuration time.Duration
+	DecayDuration        time.Duration
 }
 
 // SpeakerCandidate is one active speaker observed in a lookup window.
@@ -123,6 +124,12 @@ type SpeakerAttribution struct {
 	Candidates []SpeakerCandidate
 }
 
+// speakerCoverageState tracks one speaker's state during coverage accumulation.
+type speakerCoverageState struct {
+	active        bool
+	deactivatedAt time.Time
+}
+
 // Coverage returns active speakers in [start, end], ranked by coverage percentage.
 func (t *SpeakerTimeline) Coverage(start, end time.Time, opts SpeakerLookupOptions) SpeakerAttribution {
 	t.mu.Lock()
@@ -132,6 +139,13 @@ func (t *SpeakerTimeline) Coverage(start, end time.Time, opts SpeakerLookupOptio
 		return SpeakerAttribution{}
 	}
 
+	if opts.DecayDuration <= 0 {
+		return t.coverageBinary(start, end, opts)
+	}
+	return t.coverageDecay(start, end, opts)
+}
+
+func (t *SpeakerTimeline) coverageBinary(start, end time.Time, opts SpeakerLookupOptions) SpeakerAttribution {
 	window := end.Sub(start)
 	active := make(map[string]struct{})
 	coverage := make(map[string]time.Duration)
@@ -151,6 +165,43 @@ func (t *SpeakerTimeline) Coverage(start, end time.Time, opts SpeakerLookupOptio
 	}
 	addCoverage(coverage, active, end.Sub(cursor))
 
+	return buildAttribution(coverage, window, opts)
+}
+
+func (t *SpeakerTimeline) coverageDecay(start, end time.Time, opts SpeakerLookupOptions) SpeakerAttribution {
+	window := end.Sub(start)
+	states := make(map[string]*speakerCoverageState)
+	coverage := make(map[string]float64)
+	cursor := start
+
+	// Build initial state from events at or before the query window.
+	for _, c := range t.changes {
+		if !c.Time.After(start) {
+			applyCoverageChange(states, c)
+			continue
+		}
+		if c.Time.After(end) {
+			break
+		}
+		addDecayCoverage(coverage, states, cursor, c.Time, opts.DecayDuration)
+		applyCoverageChange(states, c)
+		cursor = c.Time
+	}
+	addDecayCoverage(coverage, states, cursor, end, opts.DecayDuration)
+
+	// Convert float64 weighted seconds to time.Duration.
+	durCoverage := make(map[string]time.Duration, len(coverage))
+	for name, secs := range coverage {
+		durCoverage[name] = time.Duration(secs * float64(time.Second))
+	}
+	return buildAttribution(durCoverage, window, opts)
+}
+
+func buildAttribution(
+	coverage map[string]time.Duration,
+	window time.Duration,
+	opts SpeakerLookupOptions,
+) SpeakerAttribution {
 	candidates := make([]SpeakerCandidate, 0, len(coverage))
 	for name, duration := range coverage {
 		pct := duration.Seconds() / window.Seconds()
@@ -176,6 +227,82 @@ func (t *SpeakerTimeline) Coverage(start, end time.Time, opts SpeakerLookupOptio
 		return stringsCompare(a.Name, b.Name)
 	})
 	return SpeakerAttribution{Candidates: candidates}
+}
+
+func applyCoverageChange(states map[string]*speakerCoverageState, c SpeakerChange) {
+	if c.Name == "" && !c.Active {
+		for _, s := range states {
+			if s.active {
+				s.active = false
+				s.deactivatedAt = c.Time
+			}
+		}
+		return
+	}
+	state := states[c.Name]
+	if state == nil {
+		state = &speakerCoverageState{}
+		states[c.Name] = state
+	}
+	if c.Active {
+		state.active = true
+		state.deactivatedAt = time.Time{}
+	} else {
+		state.active = false
+		state.deactivatedAt = c.Time
+	}
+}
+
+// addDecayCoverage accumulates weighted seconds for each speaker during [sliceStart, sliceEnd].
+func addDecayCoverage(
+	coverage map[string]float64,
+	states map[string]*speakerCoverageState,
+	sliceStart, sliceEnd time.Time,
+	decayDuration time.Duration,
+) {
+	if !sliceEnd.After(sliceStart) {
+		return
+	}
+	for name, state := range states {
+		if state.active {
+			coverage[name] += sliceEnd.Sub(sliceStart).Seconds()
+		} else if !state.deactivatedAt.IsZero() {
+			contrib := decayContribution(sliceStart, sliceEnd, state.deactivatedAt, decayDuration)
+			if contrib > 0 {
+				coverage[name] += contrib
+			}
+		}
+	}
+}
+
+// decayContribution computes the integral of the linear decay function over [sliceStart, sliceEnd].
+// The decay function is: weight(t) = max(0, 1 - (t - deactivatedAt) / decayDuration).
+func decayContribution(sliceStart, sliceEnd, deactivatedAt time.Time, decayDuration time.Duration) float64 {
+	decaySecs := decayDuration.Seconds()
+	decayEnd := deactivatedAt.Add(decayDuration)
+
+	// Clamp slice to the decaying interval.
+	if !sliceEnd.After(deactivatedAt) {
+		return 0
+	}
+	if !decayEnd.After(sliceStart) {
+		return 0
+	}
+	a := sliceStart
+	if a.Before(deactivatedAt) {
+		a = deactivatedAt
+	}
+	b := sliceEnd
+	if b.After(decayEnd) {
+		b = decayEnd
+	}
+
+	// Weight at endpoints of [a, b].
+	wa := 1.0 - a.Sub(deactivatedAt).Seconds()/decaySecs
+	wb := 1.0 - b.Sub(deactivatedAt).Seconds()/decaySecs
+
+	// Trapezoid area.
+	return (wa + wb) / 2.0 * b.Sub(a).Seconds()
 }
 
 func (t *SpeakerTimeline) evict() {
