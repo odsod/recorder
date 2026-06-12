@@ -70,6 +70,13 @@ func (e *Emitter) Emit(
 			if source == "sys" && e.OwnerName != "" {
 				attr = filterOwner(attr, e.OwnerName)
 			}
+			if source == "mic" && e.OwnerName != "" && len(attr.Candidates) == 0 {
+				attr = timeline.SpeakerAttribution{
+					Candidates: []timeline.SpeakerCandidate{
+						{Name: e.OwnerName, CoveragePct: 1.0},
+					},
+				}
+			}
 			speaker = FormatAttribution(attr)
 		}
 
