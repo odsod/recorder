@@ -201,6 +201,182 @@ func TestSpeakerTimeline_CoverageNoActiveSpeakers(tt *testing.T) {
 	}
 }
 
+func TestSpeakerTimeline_CoverageDecayMidWindow(tt *testing.T) {
+	tl := NewSpeakerTimeline(600)
+	// Alice speaks 09:00:00-09:00:05, then indicator goes off.
+	tl.SetSpeakerActive(ts("09:00:00"), "Alice", true)
+	tl.SetSpeakerActive(ts("09:00:05"), "Alice", false)
+
+	// Query window 09:00:10-09:00:11: 5s into decay with 10s decay duration.
+	// Weight at 09:00:10 = 1 - 5/10 = 0.5
+	// Weight at 09:00:11 = 1 - 6/10 = 0.4
+	// Contribution = (0.5 + 0.4) / 2 * 1s = 0.45s
+	got := tl.Coverage(ts("09:00:10"), ts("09:00:11"), SpeakerLookupOptions{
+		MinCandidatePct:      0.01,
+		MinCandidateDuration: 1 * time.Millisecond,
+		DecayDuration:        10 * time.Second,
+	})
+
+	assertCandidatesApprox(tt, got.Candidates, []approxCandidate{
+		{Name: "Alice", CoverageSec: 0.45, Pct: 0.45},
+	})
+}
+
+func TestSpeakerTimeline_CoverageDecayBeyondWindow(tt *testing.T) {
+	tl := NewSpeakerTimeline(600)
+	tl.SetSpeakerActive(ts("09:00:00"), "Alice", true)
+	tl.SetSpeakerActive(ts("09:00:05"), "Alice", false)
+
+	// Query window 09:00:16-09:00:17: 11s after deactivation, decay duration 10s.
+	// Fully decayed — no contribution.
+	got := tl.Coverage(ts("09:00:16"), ts("09:00:17"), SpeakerLookupOptions{
+		MinCandidatePct:      0.01,
+		MinCandidateDuration: 1 * time.Millisecond,
+		DecayDuration:        10 * time.Second,
+	})
+
+	if len(got.Candidates) != 0 {
+		tt.Fatalf("got %v, want no candidates", got.Candidates)
+	}
+}
+
+func TestSpeakerTimeline_CoverageDecayReactivation(tt *testing.T) {
+	tl := NewSpeakerTimeline(600)
+	// Alice speaks, stops, decays for 5s, then starts again.
+	tl.SetSpeakerActive(ts("09:00:00"), "Alice", true)
+	tl.SetSpeakerActive(ts("09:00:05"), "Alice", false)
+	tl.SetSpeakerActive(ts("09:00:10"), "Alice", true)
+	tl.SetSpeakerActive(ts("09:00:15"), "Alice", false)
+
+	// Query window 09:00:10-09:00:15: Alice is fully active (re-activated).
+	got := tl.Coverage(ts("09:00:10"), ts("09:00:15"), SpeakerLookupOptions{
+		MinCandidatePct:      0.01,
+		MinCandidateDuration: 1 * time.Millisecond,
+		DecayDuration:        10 * time.Second,
+	})
+
+	assertCandidatesApprox(tt, got.Candidates, []approxCandidate{
+		{Name: "Alice", CoverageSec: 5.0, Pct: 1.0},
+	})
+}
+
+func TestSpeakerTimeline_CoverageDecayTwoSpeakersStaggered(tt *testing.T) {
+	tl := NewSpeakerTimeline(600)
+	// Alice stops at 09:00:00, Bob starts at 09:00:03.
+	tl.SetSpeakerActive(ts("08:59:55"), "Alice", true)
+	tl.SetSpeakerActive(ts("09:00:00"), "Alice", false)
+	tl.SetSpeakerActive(ts("09:00:03"), "Bob", true)
+	tl.SetSpeakerActive(ts("09:00:06"), "Bob", false)
+
+	// Query window 09:00:03-09:00:06 (3s).
+	// Alice: decaying since 09:00:00. At 09:00:03 weight=0.7, at 09:00:06 weight=0.4.
+	//   Contribution = (0.7 + 0.4) / 2 * 3 = 1.65s
+	// Bob: active the entire 3s = 3.0s
+	// Bob should rank first.
+	got := tl.Coverage(ts("09:00:03"), ts("09:00:06"), SpeakerLookupOptions{
+		MinCandidatePct:      0.01,
+		MinCandidateDuration: 1 * time.Millisecond,
+		DecayDuration:        10 * time.Second,
+	})
+
+	assertCandidatesApprox(tt, got.Candidates, []approxCandidate{
+		{Name: "Bob", CoverageSec: 3.0, Pct: 1.0},
+		{Name: "Alice", CoverageSec: 1.65, Pct: 0.55},
+	})
+}
+
+func TestSpeakerTimeline_CoverageDecayThresholdFilters(tt *testing.T) {
+	tl := NewSpeakerTimeline(600)
+	tl.SetSpeakerActive(ts("09:00:00"), "Alice", true)
+	tl.SetSpeakerActive(ts("09:00:01"), "Alice", false)
+
+	// Query window 09:00:09-09:00:10 (1s). 8s into decay with 10s duration.
+	// Weight at 09:00:09 = 0.2, at 09:00:10 = 0.1.
+	// Contribution = (0.2 + 0.1) / 2 * 1 = 0.15s = 150ms.
+	// MinCandidateDuration = 250ms → filtered out.
+	got := tl.Coverage(ts("09:00:09"), ts("09:00:10"), SpeakerLookupOptions{
+		MinCandidatePct:      0.01,
+		MinCandidateDuration: 250 * time.Millisecond,
+		DecayDuration:        10 * time.Second,
+	})
+
+	if len(got.Candidates) != 0 {
+		tt.Fatalf("got %v, want no candidates", got.Candidates)
+	}
+}
+
+func TestSpeakerTimeline_CoverageDecayActiveBeforeWindow(tt *testing.T) {
+	tl := NewSpeakerTimeline(600)
+	// Alice deactivated 3s before the query window starts.
+	tl.SetSpeakerActive(ts("08:59:50"), "Alice", true)
+	tl.SetSpeakerActive(ts("08:59:57"), "Alice", false)
+
+	// Query window 09:00:00-09:00:02 (2s). 3s into decay.
+	// Weight at 09:00:00 = 1 - 3/10 = 0.7, at 09:00:02 = 1 - 5/10 = 0.5.
+	// Contribution = (0.7 + 0.5) / 2 * 2 = 1.2s.
+	got := tl.Coverage(ts("09:00:00"), ts("09:00:02"), SpeakerLookupOptions{
+		MinCandidatePct:      0.01,
+		MinCandidateDuration: 1 * time.Millisecond,
+		DecayDuration:        10 * time.Second,
+	})
+
+	assertCandidatesApprox(tt, got.Candidates, []approxCandidate{
+		{Name: "Alice", CoverageSec: 1.2, Pct: 0.6},
+	})
+}
+
+func TestSpeakerTimeline_CoverageDecayZeroMatchesBinary(tt *testing.T) {
+	tl := NewSpeakerTimeline(600)
+	tl.SetSpeakerActive(ts("09:00:00"), "Alice", true)
+	tl.SetSpeakerActive(ts("09:00:08"), "Alice", false)
+	tl.SetSpeakerActive(ts("09:00:02"), "Bob", true)
+	tl.SetSpeakerActive(ts("09:00:10"), "Bob", false)
+
+	opts := SpeakerLookupOptions{
+		MinCandidatePct:      0.05,
+		MinCandidateDuration: 250 * time.Millisecond,
+	}
+
+	binary := tl.Coverage(ts("09:00:00"), ts("09:00:10"), opts)
+	opts.DecayDuration = 0
+	withZeroDecay := tl.Coverage(ts("09:00:00"), ts("09:00:10"), opts)
+
+	assertCandidates(tt, binary.Candidates, []wantCandidate{
+		{Name: "Alice", Coverage: 8 * time.Second, Pct: 0.8},
+		{Name: "Bob", Coverage: 8 * time.Second, Pct: 0.8},
+	})
+	assertCandidates(tt, withZeroDecay.Candidates, []wantCandidate{
+		{Name: "Alice", Coverage: 8 * time.Second, Pct: 0.8},
+		{Name: "Bob", Coverage: 8 * time.Second, Pct: 0.8},
+	})
+}
+
+type approxCandidate struct {
+	Name        string
+	CoverageSec float64
+	Pct         float64
+}
+
+func assertCandidatesApprox(tt *testing.T, got []SpeakerCandidate, want []approxCandidate) {
+	tt.Helper()
+	if len(got) != len(want) {
+		tt.Fatalf("got %d candidates %v, want %d", len(got), got, len(want))
+	}
+	for i, candidate := range got {
+		w := want[i] //nolint:gosec // bounds guaranteed by length check above
+		if candidate.Name != w.Name {
+			tt.Fatalf("candidate[%d].Name = %q, want %q", i, candidate.Name, w.Name)
+		}
+		gotSec := candidate.Coverage.Seconds()
+		if diff := gotSec - w.CoverageSec; diff < -0.01 || diff > 0.01 {
+			tt.Fatalf("candidate[%d].Coverage = %.3fs, want %.3fs", i, gotSec, w.CoverageSec)
+		}
+		if diff := candidate.CoveragePct - w.Pct; diff < -0.01 || diff > 0.01 {
+			tt.Fatalf("candidate[%d].CoveragePct = %.4f, want %.4f", i, candidate.CoveragePct, w.Pct)
+		}
+	}
+}
+
 func TestParticipantSet_InitialUpdate(tt *testing.T) {
 	ps := NewParticipantSet()
 	newNames := ps.Update(setOf("Alice", "Bob"))

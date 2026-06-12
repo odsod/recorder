@@ -64,6 +64,7 @@ func New(ctx context.Context, cfg config.Config, svc Services) (*Recorder, error
 		LookupOptions: timeline.SpeakerLookupOptions{
 			MinCandidatePct:      minSpeakerCandidatePct,
 			MinCandidateDuration: minSpeakerCandidateDuration,
+			DecayDuration:        time.Duration(cfg.Speaker.DecayDurationS * float64(time.Second)),
 		},
 		OwnerName: cfg.Speaker.Self,
 	}

@@ -44,6 +44,7 @@ type SignalsConfig struct {
 type SpeakerConfig struct {
 	Self           string  `json:"self"`
 	AmbiguityRatio float64 `json:"ambiguityRatio"`
+	DecayDurationS float64 `json:"decayDurationS"`
 }
 
 // LogConfig holds logging settings.
