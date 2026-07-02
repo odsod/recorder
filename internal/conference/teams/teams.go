@@ -76,9 +76,16 @@ func (p *Provider) ParsePoll(jsonValue string) ([]conference.Participant, error)
 const snapshotJS = `(function() {
   return JSON.stringify(
     Array.from(document.querySelectorAll('[data-tid="voice-level-stream-outline"]')).map(function(el) {
-      var p = el.parentElement;
-      var tid = p ? p.getAttribute('data-tid') : null;
-      var name = (tid && tid.length > 2 && tid.length < 80) ? tid : null;
+      var node = el.parentElement;
+      var name = null;
+      for (var i = 0; i < 3 && node; i++) {
+        var tid = node.getAttribute('data-tid');
+        if (tid && tid.length > 2 && tid.length < 80 && tid.indexOf('video-item-container') !== 0) {
+          name = tid;
+          break;
+        }
+        node = node.parentElement;
+      }
       var classes = el.className.split(/\s+/);
       return {name: name, classes: classes};
     }).filter(function(x) { return x.name; })
@@ -88,11 +95,19 @@ const snapshotJS = `(function() {
 const pollJSTemplate = `(function() {
   return JSON.stringify(
     Array.from(document.querySelectorAll('[data-tid="voice-level-stream-outline"]')).map(function(el) {
-      var p = el.parentElement;
-      var tid = p ? p.getAttribute('data-tid') : null;
-      if (!tid || tid.length <= 2) return null;
+      var node = el.parentElement;
+      var name = null;
+      for (var i = 0; i < 3 && node; i++) {
+        var tid = node.getAttribute('data-tid');
+        if (tid && tid.length > 2 && tid.length < 80 && tid.indexOf('video-item-container') !== 0) {
+          name = tid;
+          break;
+        }
+        node = node.parentElement;
+      }
+      if (!name) return null;
       var speaking = el.classList.contains('%s');
-      return {name: tid, speaking: speaking};
+      return {name: name, speaking: speaking};
     }).filter(Boolean)
   );
 })()`
