@@ -25,13 +25,6 @@ func (r *Recorder) captureLoop(ctx context.Context, chunkCh chan<- AudioChunk) {
 	}
 	defer func() { _ = r.svc.Capture.Stop() }()
 
-	slog.InfoContext(ctx, "system source configured",
-		"source", r.svc.Capture.MonitorSource(),
-	)
-	slog.InfoContext(ctx, "mic source configured",
-		"source", r.svc.Capture.MicSource(),
-	)
-
 	accum := chunk.New(chunk.DefaultConfig())
 	audioGate := gate.Default()
 	var wasSpeech bool
@@ -47,6 +40,10 @@ func (r *Recorder) captureLoop(ctx context.Context, chunkCh chan<- AudioChunk) {
 			return
 		case frame, ok := <-frames:
 			if !ok {
+				// capture.Source only closes this channel on ctx.Done();
+				// outages (no sinks, dead parec, unreachable PulseAudio)
+				// surface as silent frame.Dual values instead, so reaching
+				// here means real shutdown.
 				if out, ok := accum.Flush(); ok {
 					r.emitChunk(ctx, out.SysPCM, out.MicPCM, out.StartTime, audioGate, chunkCh)
 				}
