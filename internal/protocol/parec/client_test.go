@@ -24,29 +24,6 @@ func (f *fakeRunner) Start(ctx context.Context, name string, args ...string) (io
 	return f.startFn(ctx, name, args...)
 }
 
-func TestGetDefaultSink(t *testing.T) {
-	runner := &fakeRunner{
-		outputFn: func(ctx context.Context, name string, args ...string) ([]byte, error) {
-			if name != "pactl" {
-				t.Errorf("expected pactl, got %s", name)
-			}
-			if len(args) != 1 || args[0] != "get-default-sink" {
-				t.Errorf("unexpected args: %v", args)
-			}
-			return []byte("alsa_output.pci\n"), nil
-		},
-	}
-
-	client := parec.New(runner)
-	resp, err := client.GetDefaultSink(context.Background(), parec.GetDefaultSinkRequest{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resp.MonitorSource != "alsa_output.pci.monitor" {
-		t.Errorf("expected 'alsa_output.pci.monitor', got %q", resp.MonitorSource)
-	}
-}
-
 func TestGetDefaultSource(t *testing.T) {
 	runner := &fakeRunner{
 		outputFn: func(ctx context.Context, name string, args ...string) ([]byte, error) {
@@ -70,23 +47,6 @@ func TestGetDefaultSource(t *testing.T) {
 	}
 }
 
-func TestGetDefaultSink_Error(t *testing.T) {
-	runner := &fakeRunner{
-		outputFn: func(ctx context.Context, name string, args ...string) ([]byte, error) {
-			return nil, errors.New("command not found")
-		},
-	}
-
-	client := parec.New(runner)
-	_, err := client.GetDefaultSink(context.Background(), parec.GetDefaultSinkRequest{})
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !strings.Contains(err.Error(), "pactl get-default-sink") {
-		t.Errorf("expected wrapped error, got: %v", err)
-	}
-}
-
 func TestGetDefaultSource_Error(t *testing.T) {
 	runner := &fakeRunner{
 		outputFn: func(ctx context.Context, name string, args ...string) ([]byte, error) {
@@ -100,6 +60,98 @@ func TestGetDefaultSource_Error(t *testing.T) {
 		t.Fatal("expected error")
 	}
 	if !strings.Contains(err.Error(), "pactl get-default-source") {
+		t.Errorf("expected wrapped error, got: %v", err)
+	}
+}
+
+func TestListSinks(t *testing.T) {
+	runner := &fakeRunner{
+		outputFn: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			if name != "pactl" {
+				t.Errorf("expected pactl, got %s", name)
+			}
+			expectedArgs := []string{"--format=json", "list", "sinks"}
+			if len(args) != len(expectedArgs) {
+				t.Fatalf("expected %d args, got %d: %v", len(expectedArgs), len(args), args)
+			}
+			for i, exp := range expectedArgs {
+				if args[i] != exp {
+					t.Errorf("arg %d: expected %q, got %q", i, exp, args[i])
+				}
+			}
+			return []byte(`[
+				{"name": "alsa_output.pci.hdmi"},
+				{"name": "bluez_output.usb"}
+			]`), nil
+		},
+	}
+
+	client := parec.New(runner)
+	resp, err := client.ListSinks(context.Background(), parec.ListSinksRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []parec.Sink{
+		{Name: "alsa_output.pci.hdmi", MonitorSource: "alsa_output.pci.hdmi.monitor"},
+		{Name: "bluez_output.usb", MonitorSource: "bluez_output.usb.monitor"},
+	}
+	if len(resp.Sinks) != len(want) {
+		t.Fatalf("expected %d sinks, got %d: %v", len(want), len(resp.Sinks), resp.Sinks)
+	}
+	for i, w := range want {
+		if resp.Sinks[i] != w {
+			t.Errorf("sink %d: expected %+v, got %+v", i, w, resp.Sinks[i])
+		}
+	}
+}
+
+func TestListSinks_Empty(t *testing.T) {
+	runner := &fakeRunner{
+		outputFn: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			return []byte(`[]`), nil
+		},
+	}
+
+	client := parec.New(runner)
+	resp, err := client.ListSinks(context.Background(), parec.ListSinksRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Sinks) != 0 {
+		t.Errorf("expected no sinks, got %v", resp.Sinks)
+	}
+}
+
+func TestListSinks_InvalidJSON(t *testing.T) {
+	runner := &fakeRunner{
+		outputFn: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			return []byte(`not json`), nil
+		},
+	}
+
+	client := parec.New(runner)
+	_, err := client.ListSinks(context.Background(), parec.ListSinksRequest{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "parse pactl sinks json") {
+		t.Errorf("expected wrapped error, got: %v", err)
+	}
+}
+
+func TestListSinks_CommandError(t *testing.T) {
+	runner := &fakeRunner{
+		outputFn: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			return nil, errors.New("command not found")
+		},
+	}
+
+	client := parec.New(runner)
+	_, err := client.ListSinks(context.Background(), parec.ListSinksRequest{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "pactl list sinks") {
 		t.Errorf("expected wrapped error, got: %v", err)
 	}
 }

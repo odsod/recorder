@@ -4,13 +4,14 @@
 // command for streaming raw PCM audio. The CommandRunner interface allows
 // injecting a fake for testing without real PulseAudio.
 //
-// Query operations (GetDefaultSink, GetDefaultSource) follow the standard
+// Query operations (ListSinks, GetDefaultSource) follow the standard
 // request/response pattern. StartCapture returns a CaptureStream that
 // implements io.Reader for continuous audio data and io.Closer to stop capture.
 package parec
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os/exec"
@@ -70,27 +71,6 @@ func NewDefault() *Client {
 	return &Client{runner: ExecRunner{}}
 }
 
-// GetDefaultSinkRequest is empty; the default sink is a system-global query.
-type GetDefaultSinkRequest struct{}
-
-// GetDefaultSinkResponse contains the monitor source for the default output device.
-type GetDefaultSinkResponse struct {
-	// MonitorSource is the PulseAudio source name for capturing system audio
-	// (the default sink name with ".monitor" appended).
-	MonitorSource string
-}
-
-// GetDefaultSink queries the system's default audio output device.
-func (c *Client) GetDefaultSink(ctx context.Context, _ GetDefaultSinkRequest) (GetDefaultSinkResponse, error) {
-	out, err := c.runner.Output(ctx, "pactl", "get-default-sink")
-	if err != nil {
-		return GetDefaultSinkResponse{}, fmt.Errorf("pactl get-default-sink: %w", err)
-	}
-	return GetDefaultSinkResponse{
-		MonitorSource: strings.TrimSpace(string(out)) + ".monitor",
-	}, nil
-}
-
 // GetDefaultSourceRequest is empty; the default source is a system-global query.
 type GetDefaultSourceRequest struct{}
 
@@ -109,6 +89,43 @@ func (c *Client) GetDefaultSource(ctx context.Context, _ GetDefaultSourceRequest
 	return GetDefaultSourceResponse{
 		Source: strings.TrimSpace(string(out)),
 	}, nil
+}
+
+// ListSinksRequest is empty; sinks are a system-global query.
+type ListSinksRequest struct{}
+
+// Sink describes one PulseAudio sink. Name is its stable identity across
+// polls; numeric indexes are reused by PipeWire across device churn.
+type Sink struct {
+	// Name is the sink's PulseAudio name.
+	Name string
+	// MonitorSource is the PulseAudio source name for capturing audio played
+	// through this sink (Name with ".monitor" appended).
+	MonitorSource string
+}
+
+// ListSinksResponse contains all currently known sinks.
+type ListSinksResponse struct {
+	Sinks []Sink
+}
+
+// ListSinks enumerates all PulseAudio sinks.
+func (c *Client) ListSinks(ctx context.Context, _ ListSinksRequest) (ListSinksResponse, error) {
+	out, err := c.runner.Output(ctx, "pactl", "--format=json", "list", "sinks")
+	if err != nil {
+		return ListSinksResponse{}, fmt.Errorf("pactl list sinks: %w", err)
+	}
+	var wire []struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(out, &wire); err != nil {
+		return ListSinksResponse{}, fmt.Errorf("parse pactl sinks json: %w", err)
+	}
+	sinks := make([]Sink, 0, len(wire))
+	for _, s := range wire {
+		sinks = append(sinks, Sink{Name: s.Name, MonitorSource: s.Name + ".monitor"})
+	}
+	return ListSinksResponse{Sinks: sinks}, nil
 }
 
 // StartCaptureRequest specifies the audio device and format for streaming capture.
