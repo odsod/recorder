@@ -96,8 +96,8 @@ type fakeSinkClient struct {
 	client     *parec.Client
 	sinks      []parec.Sink
 	sinksErr   error
-	source     string
-	sourceErr  error
+	sources    []parec.Source
+	sourcesErr error
 	startErrFn func(device string) error
 }
 
@@ -115,16 +115,16 @@ func (f *fakeSinkClient) ListSinks(ctx context.Context, _ parec.ListSinksRequest
 	return parec.ListSinksResponse{Sinks: f.sinks}, nil
 }
 
-func (f *fakeSinkClient) GetDefaultSource(
+func (f *fakeSinkClient) ListSources(
 	ctx context.Context,
-	_ parec.GetDefaultSourceRequest,
-) (parec.GetDefaultSourceResponse, error) {
+	_ parec.ListSourcesRequest,
+) (parec.ListSourcesResponse, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.sourceErr != nil {
-		return parec.GetDefaultSourceResponse{}, f.sourceErr
+	if f.sourcesErr != nil {
+		return parec.ListSourcesResponse{}, f.sourcesErr
 	}
-	return parec.GetDefaultSourceResponse{Source: f.source}, nil
+	return parec.ListSourcesResponse{Sources: f.sources}, nil
 }
 
 func (f *fakeSinkClient) StartCapture(
@@ -154,16 +154,16 @@ func (f *fakeSinkClient) setSinksErr(err error) {
 	f.sinksErr = err
 }
 
-func (f *fakeSinkClient) setSource(name string) {
+func (f *fakeSinkClient) setSources(sources ...parec.Source) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.source = name
+	f.sources = sources
 }
 
-func (f *fakeSinkClient) setSourceErr(err error) {
+func (f *fakeSinkClient) setSourcesErr(err error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.sourceErr = err
+	f.sourcesErr = err
 }
 
 // waitFor polls cond until it returns true or the timeout elapses.
@@ -206,7 +206,7 @@ func TestParec_MultiSinkMixing(t *testing.T) {
 		parec.Sink{Name: "b", MonitorSource: "b.monitor"},
 	)
 
-	src := &Parec{client: client, sinks: make(map[string]*reader)}
+	src := &Parec{client: client, sinks: make(map[string]*reader), mics: make(map[string]*reader)}
 	frames, err := src.Start(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -227,7 +227,7 @@ func TestParec_SinkAppears(t *testing.T) {
 	client := newFakeSinkClient()
 	client.runner.setStream("a.monitor", bytes.Repeat([]byte{0x05, 0x00}, pcm.FrameBytes/2))
 
-	src := &Parec{client: client, sinks: make(map[string]*reader)}
+	src := &Parec{client: client, sinks: make(map[string]*reader), mics: make(map[string]*reader)}
 	frames, err := src.Start(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -259,7 +259,7 @@ func TestParec_SinkDisappears(t *testing.T) {
 		parec.Sink{Name: "b", MonitorSource: "b.monitor"},
 	)
 
-	src := &Parec{client: client, sinks: make(map[string]*reader)}
+	src := &Parec{client: client, sinks: make(map[string]*reader), mics: make(map[string]*reader)}
 	if _, err := src.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +288,7 @@ func TestParec_SinkReappearsNewIndex(t *testing.T) {
 	client.runner.setStream("a.monitor", bytes.Repeat([]byte{0x05, 0x00}, pcm.FrameBytes/2))
 	client.setSinks(parec.Sink{Name: "a", MonitorSource: "a.monitor"})
 
-	src := &Parec{client: client, sinks: make(map[string]*reader)}
+	src := &Parec{client: client, sinks: make(map[string]*reader), mics: make(map[string]*reader)}
 	_, err := src.Start(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -319,14 +319,14 @@ func TestParec_SinkReappearsNewIndex(t *testing.T) {
 	})
 }
 
-func TestParec_MicHotSwapSuccess(t *testing.T) {
+func TestParec_MicSourceAppears(t *testing.T) {
 	withFastPolling(t)
 	client := newFakeSinkClient()
 	client.runner.setStream("mic1", bytes.Repeat([]byte{0x07, 0x00}, pcm.FrameBytes/2))
 	client.runner.setStream("mic2", bytes.Repeat([]byte{0x08, 0x00}, pcm.FrameBytes/2))
-	client.setSource("mic1")
+	client.setSources(parec.Source{Name: "mic1"})
 
-	src := &Parec{client: client, sinks: make(map[string]*reader)}
+	src := &Parec{client: client, sinks: make(map[string]*reader), mics: make(map[string]*reader)}
 	frames, err := src.Start(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -336,36 +336,38 @@ func TestParec_MicHotSwapSuccess(t *testing.T) {
 	waitFor(t, time.Second, func() bool {
 		src.mu.Lock()
 		defer src.mu.Unlock()
-		return src.micName == "mic1"
+		_, ok := src.mics["mic1"]
+		return ok
 	})
 
-	client.setSource("mic2")
+	client.setSources(parec.Source{Name: "mic1"}, parec.Source{Name: "mic2"})
 	waitFor(t, time.Second, func() bool {
 		src.mu.Lock()
 		defer src.mu.Unlock()
-		return src.micName == "mic2"
+		_, ok := src.mics["mic2"]
+		return ok
 	})
 
 	found := false
 	for range 200 {
 		f := <-frames
-		if f.Mic[0] == 0x08 {
+		if f.Mic[0] == 0x08 || f.Mic[0] == 0x0f {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Error("expected mic audio from new source after hot-swap")
+		t.Error("expected mic audio from new source after discovery")
 	}
 }
 
-func TestParec_MicHotSwapFailureRetainsOld(t *testing.T) {
+func TestParec_MicCaptureFailureDoesNotAffectOthers(t *testing.T) {
 	withFastPolling(t)
 	client := newFakeSinkClient()
 	client.runner.setStream("mic1", bytes.Repeat([]byte{0x07, 0x00}, pcm.FrameBytes/2))
-	client.setSource("mic1")
+	client.setSources(parec.Source{Name: "mic1"})
 
-	src := &Parec{client: client, sinks: make(map[string]*reader)}
+	src := &Parec{client: client, sinks: make(map[string]*reader), mics: make(map[string]*reader)}
 	_, err := src.Start(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -375,7 +377,8 @@ func TestParec_MicHotSwapFailureRetainsOld(t *testing.T) {
 	waitFor(t, time.Second, func() bool {
 		src.mu.Lock()
 		defer src.mu.Unlock()
-		return src.micName == "mic1"
+		_, ok := src.mics["mic1"]
+		return ok
 	})
 
 	client.mu.Lock()
@@ -386,24 +389,19 @@ func TestParec_MicHotSwapFailureRetainsOld(t *testing.T) {
 		return nil
 	}
 	client.mu.Unlock()
-	client.setSource("mic2")
+	client.setSources(parec.Source{Name: "mic1"}, parec.Source{Name: "mic2"})
 
 	time.Sleep(100 * time.Millisecond)
 
 	src.mu.Lock()
-	name := src.micName
-	mic := src.mic
+	_, hasMic1 := src.mics["mic1"]
+	_, hasMic2 := src.mics["mic2"]
 	src.mu.Unlock()
-	if name != "mic1" {
-		t.Errorf("expected mic to remain mic1 after failed swap, got %q", name)
+	if !hasMic1 {
+		t.Error("expected mic1 to still be active")
 	}
-	if mic == nil {
-		t.Fatal("expected mic reader to still be present")
-	}
-	select {
-	case <-mic.dead():
-		t.Error("old mic reader should still be alive after a failed swap")
-	default:
+	if hasMic2 {
+		t.Error("expected mic2 to not be active after failed start")
 	}
 }
 
@@ -417,7 +415,7 @@ func TestParec_ReaderExitTriggersRestartWithoutKillingOthers(t *testing.T) {
 		parec.Sink{Name: "b", MonitorSource: "b.monitor"},
 	)
 
-	src := &Parec{client: client, sinks: make(map[string]*reader)}
+	src := &Parec{client: client, sinks: make(map[string]*reader), mics: make(map[string]*reader)}
 	_, err := src.Start(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -465,9 +463,9 @@ func TestParec_PulseAudioUnreachableThenRecovers(t *testing.T) {
 	withFastPolling(t)
 	client := newFakeSinkClient()
 	client.setSinksErr(io.ErrClosedPipe)
-	client.setSourceErr(io.ErrClosedPipe)
+	client.setSourcesErr(io.ErrClosedPipe)
 
-	src := &Parec{client: client, sinks: make(map[string]*reader)}
+	src := &Parec{client: client, sinks: make(map[string]*reader), mics: make(map[string]*reader)}
 	frames, err := src.Start(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -484,15 +482,16 @@ func TestParec_PulseAudioUnreachableThenRecovers(t *testing.T) {
 	client.runner.setStream("a.monitor", bytes.Repeat([]byte{0x09, 0x00}, pcm.FrameBytes/2))
 	client.setSinksErr(nil)
 	client.setSinks(parec.Sink{Name: "a", MonitorSource: "a.monitor"})
-	client.setSourceErr(nil)
-	client.setSource("mic1")
+	client.setSourcesErr(nil)
+	client.setSources(parec.Source{Name: "mic1"})
 	client.runner.setStream("mic1", bytes.Repeat([]byte{0x0a, 0x00}, pcm.FrameBytes/2))
 
 	waitFor(t, 2*time.Second, func() bool {
 		src.mu.Lock()
 		defer src.mu.Unlock()
 		_, hasSink := src.sinks["a"]
-		return hasSink && src.micName == "mic1"
+		_, hasMic := src.mics["mic1"]
+		return hasSink && hasMic
 	})
 }
 
@@ -508,7 +507,7 @@ func isSilent(data []byte) bool {
 func TestParec_Stop_Idempotent(t *testing.T) {
 	withFastPolling(t)
 	client := newFakeSinkClient()
-	src := &Parec{client: client, sinks: make(map[string]*reader)}
+	src := &Parec{client: client, sinks: make(map[string]*reader), mics: make(map[string]*reader)}
 	if _, err := src.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -523,7 +522,7 @@ func TestParec_Stop_Idempotent(t *testing.T) {
 func TestParec_Backpressure_SlowConsumerDoesNotDropFrames(t *testing.T) {
 	withFastPolling(t)
 	client := newFakeSinkClient()
-	src := &Parec{client: client, sinks: make(map[string]*reader)}
+	src := &Parec{client: client, sinks: make(map[string]*reader), mics: make(map[string]*reader)}
 	frames, err := src.Start(context.Background())
 	if err != nil {
 		t.Fatal(err)

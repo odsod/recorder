@@ -15,14 +15,13 @@ import (
 var tickInterval = time.Second
 
 // Parec implements Source by dynamically monitoring every PulseAudio sink
-// plus the default microphone, mixing simultaneous sink audio together.
+// plus all input sources (microphones), mixing simultaneous audio together.
 type Parec struct {
 	client sinkClient
 
-	mu      sync.Mutex
-	sinks   map[string]*reader // keyed by sink name
-	mic     *reader
-	micName string
+	mu    sync.Mutex
+	sinks map[string]*reader // keyed by sink name
+	mics  map[string]*reader // keyed by source name
 
 	sinkBackoff backoff
 	sinkLastTry time.Time
@@ -36,7 +35,7 @@ type Parec struct {
 
 // NewParec creates a Parec source using the given parec protocol client.
 func NewParec(client *parec.Client) *Parec {
-	return &Parec{client: client, sinks: make(map[string]*reader)}
+	return &Parec{client: client, sinks: make(map[string]*reader), mics: make(map[string]*reader)}
 }
 
 // Start begins dynamic sink and microphone capture, returning a channel of
@@ -83,17 +82,15 @@ func (c *Parec) mixTick() frame.Dual {
 			sinkFrames = append(sinkFrames, data)
 		}
 	}
-	micReader := c.mic
-	c.mu.Unlock()
-
-	mic := frame.Silent(pcm.FrameBytes)
-	if micReader != nil {
-		if data, ok := micReader.take(); ok {
-			mic = data
+	micFrames := make([][]byte, 0, len(c.mics))
+	for _, r := range c.mics {
+		if data, ok := r.take(); ok {
+			micFrames = append(micFrames, data)
 		}
 	}
+	c.mu.Unlock()
 
-	return frame.Dual{Sys: pcm.Mix(sinkFrames...), Mic: mic}
+	return frame.Dual{Sys: pcm.Mix(sinkFrames...), Mic: pcm.Mix(micFrames...)}
 }
 
 // Stop terminates all capture streams. Idempotent.
@@ -108,8 +105,8 @@ func (c *Parec) Stop() error {
 		for _, r := range c.sinks {
 			_ = r.stop()
 		}
-		if c.mic != nil {
-			_ = c.mic.stop()
+		for _, r := range c.mics {
+			_ = r.stop()
 		}
 		c.mu.Unlock()
 	})

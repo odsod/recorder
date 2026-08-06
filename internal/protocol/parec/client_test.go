@@ -156,6 +156,62 @@ func TestListSinks_CommandError(t *testing.T) {
 	}
 }
 
+func TestListSources(t *testing.T) {
+	runner := &fakeRunner{
+		outputFn: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			expectedArgs := []string{"--format=json", "list", "sources"}
+			if len(args) != len(expectedArgs) {
+				t.Fatalf("expected %d args, got %d: %v", len(expectedArgs), len(args), args)
+			}
+			for i, exp := range expectedArgs {
+				if args[i] != exp {
+					t.Errorf("arg %d: expected %q, got %q", i, exp, args[i])
+				}
+			}
+			return []byte(`[
+				{"name": "alsa_output.hdmi.monitor", "monitor_source": "alsa_output.hdmi"},
+				{"name": "alsa_input.usb-mic", "monitor_source": ""},
+				{"name": "bluez_input.headset", "monitor_source": ""}
+			]`), nil
+		},
+	}
+
+	client := parec.New(runner)
+	resp, err := client.ListSources(context.Background(), parec.ListSourcesRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []parec.Source{
+		{Name: "alsa_input.usb-mic"},
+		{Name: "bluez_input.headset"},
+	}
+	if len(resp.Sources) != len(want) {
+		t.Fatalf("expected %d sources, got %d: %v", len(want), len(resp.Sources), resp.Sources)
+	}
+	for i, w := range want {
+		if resp.Sources[i] != w {
+			t.Errorf("source %d: expected %+v, got %+v", i, w, resp.Sources[i])
+		}
+	}
+}
+
+func TestListSources_CommandError(t *testing.T) {
+	runner := &fakeRunner{
+		outputFn: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			return nil, errors.New("command not found")
+		},
+	}
+
+	client := parec.New(runner)
+	_, err := client.ListSources(context.Background(), parec.ListSourcesRequest{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "pactl list sources") {
+		t.Errorf("expected wrapped error, got: %v", err)
+	}
+}
+
 func TestStartCapture(t *testing.T) {
 	pcmData := bytes.Repeat([]byte{0x01, 0x02}, 100)
 	closed := false

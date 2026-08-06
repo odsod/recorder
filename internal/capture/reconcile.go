@@ -51,7 +51,7 @@ func (c *Parec) reconcileLoop(ctx context.Context) {
 	defer micTicker.Stop()
 
 	c.reconcileSinks(ctx)
-	c.reconcileMic(ctx)
+	c.reconcileMics(ctx)
 
 	for {
 		select {
@@ -60,7 +60,7 @@ func (c *Parec) reconcileLoop(ctx context.Context) {
 		case <-sinkTicker.C:
 			c.reconcileSinks(ctx)
 		case <-micTicker.C:
-			c.reconcileMic(ctx)
+			c.reconcileMics(ctx)
 		}
 	}
 }
@@ -148,18 +148,17 @@ func (c *Parec) stopSink(name string, r *reader, reason string) {
 	)
 }
 
-// reconcileMic resolves the default microphone source and swaps to it only
-// after the replacement capture starts successfully, so a failed swap never
-// drops below one working mic reader.
-func (c *Parec) reconcileMic(ctx context.Context) {
+// reconcileMics lists all input sources and diffs them against active mic
+// readers by name. Same pattern as reconcileSinks.
+func (c *Parec) reconcileMics(ctx context.Context) {
 	if time.Since(c.micLastTry) < c.micBackoff.cur {
 		return
 	}
 	c.micLastTry = time.Now()
 
-	resp, err := c.client.GetDefaultSource(ctx, parec.GetDefaultSourceRequest{})
+	resp, err := c.client.ListSources(ctx, parec.ListSourcesRequest{})
 	if err != nil {
-		slog.WarnContext(ctx, "get default source failed",
+		slog.WarnContext(ctx, "list sources failed",
 			"err", err,
 			"retryIn", c.micBackoff.next(),
 		)
@@ -167,52 +166,62 @@ func (c *Parec) reconcileMic(ctx context.Context) {
 	}
 	c.micBackoff.reset()
 
+	wanted := make(map[string]parec.Source, len(resp.Sources))
+	for _, s := range resp.Sources {
+		wanted[s.Name] = s
+	}
+
 	c.mu.Lock()
-	name := resp.Source
-	current := c.mic
-	currentName := c.micName
+	current := make(map[string]*reader, len(c.mics))
+	maps.Copy(current, c.mics)
 	c.mu.Unlock()
 
-	dead := false
-	if current != nil {
+	for name, r := range current {
+		if _, ok := wanted[name]; !ok {
+			c.stopMic(name, r, "source disappeared")
+			continue
+		}
 		select {
-		case <-current.dead():
-			dead = true
+		case <-r.dead():
+			c.stopMic(name, r, "mic reader exited")
 		default:
 		}
 	}
 
-	if current != nil && !dead && name == currentName {
-		return
-	}
+	for name := range wanted {
+		c.mu.Lock()
+		_, active := c.mics[name]
+		c.mu.Unlock()
+		if active {
+			continue
+		}
 
-	stream, err := c.client.StartCapture(ctx, parec.StartCaptureRequest{
-		Device: name, SampleRate: pcm.SampleRate,
-	})
-	if err != nil {
-		slog.WarnContext(ctx, "mic capture start failed",
-			"source", name,
-			"err", err,
-		)
-		return
-	}
+		stream, err := c.client.StartCapture(ctx, parec.StartCaptureRequest{
+			Device: name, SampleRate: pcm.SampleRate,
+		})
+		if err != nil {
+			slog.WarnContext(ctx, "mic capture start failed",
+				"source", name,
+				"err", err,
+			)
+			continue
+		}
 
-	r := startReader(stream)
-	c.mu.Lock()
-	c.mic = r
-	c.micName = name
-	c.mu.Unlock()
-
-	if current != nil {
-		_ = current.stop()
-	}
-
-	if currentName == "" {
+		r := startReader(stream)
+		c.mu.Lock()
+		c.mics[name] = r
+		c.mu.Unlock()
 		slog.InfoContext(ctx, "mic capture started", "source", name)
-	} else {
-		slog.InfoContext(ctx, "default microphone changed",
-			"old", currentName,
-			"new", name,
-		)
 	}
+}
+
+func (c *Parec) stopMic(name string, r *reader, reason string) {
+	c.mu.Lock()
+	delete(c.mics, name)
+	c.mu.Unlock()
+	_ = r.stop()
+	slog.InfoContext(context.Background(), "mic capture stopped",
+		"source", name,
+		"reason", reason,
+	)
 }

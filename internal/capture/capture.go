@@ -17,6 +17,6 @@ type Source interface {
 // Narrowed for testability; *parec.Client satisfies it structurally.
 type sinkClient interface {
 	ListSinks(ctx context.Context, req parec.ListSinksRequest) (parec.ListSinksResponse, error)
-	GetDefaultSource(ctx context.Context, req parec.GetDefaultSourceRequest) (parec.GetDefaultSourceResponse, error)
+	ListSources(ctx context.Context, req parec.ListSourcesRequest) (parec.ListSourcesResponse, error)
 	StartCapture(ctx context.Context, req parec.StartCaptureRequest) (*parec.CaptureStream, error)
 }
