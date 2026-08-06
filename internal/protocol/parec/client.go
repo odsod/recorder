@@ -91,6 +91,43 @@ func (c *Client) GetDefaultSource(ctx context.Context, _ GetDefaultSourceRequest
 	}, nil
 }
 
+// ListSourcesRequest is empty; sources are a system-global query.
+type ListSourcesRequest struct{}
+
+// Source describes one PulseAudio input source (microphone).
+type Source struct {
+	// Name is the source's PulseAudio name.
+	Name string
+}
+
+// ListSourcesResponse contains all currently known input sources (non-monitor).
+type ListSourcesResponse struct {
+	Sources []Source
+}
+
+// ListSources enumerates all PulseAudio input sources, excluding sink monitors.
+func (c *Client) ListSources(ctx context.Context, _ ListSourcesRequest) (ListSourcesResponse, error) {
+	out, err := c.runner.Output(ctx, "pactl", "--format=json", "list", "sources")
+	if err != nil {
+		return ListSourcesResponse{}, fmt.Errorf("pactl list sources: %w", err)
+	}
+	var wire []struct {
+		Name          string `json:"name"`
+		MonitorSource string `json:"monitor_source"`
+	}
+	if err := json.Unmarshal(out, &wire); err != nil {
+		return ListSourcesResponse{}, fmt.Errorf("parse pactl sources json: %w", err)
+	}
+	sources := make([]Source, 0, len(wire))
+	for _, s := range wire {
+		if s.MonitorSource != "" {
+			continue
+		}
+		sources = append(sources, Source{Name: s.Name})
+	}
+	return ListSourcesResponse{Sources: sources}, nil
+}
+
 // ListSinksRequest is empty; sinks are a system-global query.
 type ListSinksRequest struct{}
 
