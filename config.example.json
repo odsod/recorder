@@ -26,6 +26,7 @@
   },
   "promptVars": {
     "languages": ["Swedish", "English"],
+    "glossaryFile": "",
     "owner": {
       "role": "software engineer",
       "summaryFor": "a human inbox"

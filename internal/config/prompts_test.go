@@ -131,6 +131,89 @@ func TestRenderTemplate_InvalidSyntax(t *testing.T) {
 	}
 }
 
+func TestResolvePrompts_GlossaryRenderedInCleanupAndSummarize(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "glossary.md")
+	if err := os.WriteFile(path, []byte("- BigQuery\n- cut entry\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	vars := defaultPromptVars()
+	vars.GlossaryFile = path
+
+	prompts, err := resolvePrompts(PromptPathsConfig{}, vars)
+	if err != nil {
+		t.Fatalf("resolvePrompts() error = %v", err)
+	}
+	for name, got := range map[string]string{
+		"cleanup":   prompts.Cleanup,
+		"summarize": prompts.Summarize,
+	} {
+		if !strings.Contains(got, "cut entry") {
+			t.Errorf("%s prompt missing glossary term", name)
+		}
+		if !strings.Contains(got, "BigQuery") {
+			t.Errorf("%s prompt missing glossary term", name)
+		}
+	}
+}
+
+func TestResolvePrompts_NoGlossaryByDefault(t *testing.T) {
+	prompts, err := resolvePrompts(PromptPathsConfig{}, defaultPromptVars())
+	if err != nil {
+		t.Fatalf("resolvePrompts() error = %v", err)
+	}
+	if strings.Contains(prompts.Cleanup, "## Glossary") {
+		t.Error("cleanup prompt should omit the glossary section when unset")
+	}
+	if strings.Contains(prompts.Summarize, "## Terminology") {
+		t.Error("summarize prompt should omit the terminology section when unset")
+	}
+}
+
+func TestResolvePrompts_MissingGlossaryFileIsNotFatal(t *testing.T) {
+	vars := defaultPromptVars()
+	vars.GlossaryFile = filepath.Join(t.TempDir(), "absent.md")
+
+	prompts, err := resolvePrompts(PromptPathsConfig{}, vars)
+	if err != nil {
+		t.Fatalf("resolvePrompts() error = %v", err)
+	}
+	if strings.Contains(prompts.Cleanup, "## Glossary") {
+		t.Error("missing glossary file should render an empty glossary")
+	}
+}
+
+func TestLoad_GlossaryFile(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+
+	glossaryPath := filepath.Join(root, "recorder", "glossary.md")
+	if err := os.MkdirAll(filepath.Dir(glossaryPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(glossaryPath, []byte("- BigQuery"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	configPath := filepath.Join(root, "recorder", "config.json")
+	configJSON := `{"promptVars":{"glossaryFile":"` + glossaryPath + `"}}`
+	if err := os.WriteFile(configPath, []byte(configJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !strings.Contains(cfg.Prompts.Cleanup, "BigQuery") {
+		t.Error("expected glossary in cleanup prompt")
+	}
+	if !strings.Contains(cfg.Prompts.Summarize, "BigQuery") {
+		t.Error("expected glossary in summarize prompt")
+	}
+}
+
 func TestLoad_ResolvesPromptsWithoutConfigFile(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"text/template"
 )
 
@@ -34,7 +35,13 @@ type Prompts struct {
 }
 
 func resolvePrompts(paths PromptPathsConfig, vars PromptVarsConfig) (Prompts, error) {
+	glossary, err := loadGlossary(vars.GlossaryFile)
+	if err != nil {
+		return Prompts{}, fmt.Errorf("promptVars.glossaryFile: %w", err)
+	}
+
 	data := promptTemplateData(vars)
+	data.Glossary = glossary
 
 	cleanup, err := resolvePrompt("cleanup", paths.Cleanup, defaultCleanupTemplate, data)
 	if err != nil {
@@ -54,6 +61,23 @@ func resolvePrompts(paths PromptPathsConfig, vars PromptVarsConfig) (Prompts, er
 		Summarize: summarize,
 		Combine:   combine,
 	}, nil
+}
+
+// loadGlossary reads the optional glossary file. The file holds user data, so a
+// missing file is not an error: it yields an empty glossary and a warning.
+func loadGlossary(path string) (string, error) {
+	if path == "" {
+		return "", nil
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "warning: glossary file %s not found, continuing without glossary\n", path)
+			return "", nil
+		}
+		return "", err
+	}
+	return strings.TrimSpace(string(content)), nil
 }
 
 func resolvePrompt(name, path, defaultTemplate string, data PromptTemplateData) (string, error) {

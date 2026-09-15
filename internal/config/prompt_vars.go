@@ -12,6 +12,7 @@ type OwnerPromptVars struct {
 type PromptVarsConfig struct {
 	Languages         []string        `json:"languages"`
 	FillerWords       []string        `json:"fillerWords"`
+	GlossaryFile      string          `json:"glossaryFile"`
 	Owner             OwnerPromptVars `json:"owner"`
 	IncludeInSummary  []string        `json:"includeInSummary"`
 	TitleMaxWords     int             `json:"titleMaxWords"`
@@ -29,6 +30,7 @@ type PromptTemplateData struct {
 	LanguagesOr        string
 	LanguagesJoin      string
 	FillerWordsJoin    string
+	Glossary           string
 	TitleStopWordsJoin string
 	SummaryLabelsJoin  string
 }
@@ -64,6 +66,9 @@ func mergePromptVars(overrides, defaults PromptVarsConfig) PromptVarsConfig {
 	}
 	if len(overrides.FillerWords) > 0 {
 		merged.FillerWords = overrides.FillerWords
+	}
+	if overrides.GlossaryFile != "" {
+		merged.GlossaryFile = overrides.GlossaryFile
 	}
 	if overrides.Owner.Role != "" {
 		merged.Owner.Role = overrides.Owner.Role

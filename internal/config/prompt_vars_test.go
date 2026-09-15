@@ -19,6 +19,18 @@ func TestPromptTemplateData(t *testing.T) {
 	}
 }
 
+func TestMergePromptVars_GlossaryFile(t *testing.T) {
+	merged := mergePromptVars(PromptVarsConfig{GlossaryFile: "/tmp/terms.md"}, defaultPromptVars())
+	if merged.GlossaryFile != "/tmp/terms.md" {
+		t.Errorf("GlossaryFile = %q", merged.GlossaryFile)
+	}
+
+	unchanged := mergePromptVars(PromptVarsConfig{}, defaultPromptVars())
+	if unchanged.GlossaryFile != defaultPromptVars().GlossaryFile {
+		t.Errorf("GlossaryFile = %q, want default", unchanged.GlossaryFile)
+	}
+}
+
 func TestDefaultPromptVars(t *testing.T) {
 	vars := defaultPromptVars()
 	if len(vars.Languages) == 0 {
