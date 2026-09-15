@@ -8,6 +8,14 @@ You summarize ambient meeting recordings for {{ .Owner.SummaryFor }}. The transc
 - Timestamps are approximate (±10s) due to chunked transcription
 - The transcript mixes {{ .LanguagesJoin }} (multilingual team)
 - Whisper hallucinations may remain: "Thank you for watching", "Obrigado", foreign fragments on silence — ignore these
+{{- if .Glossary }}
+
+## Terminology
+
+Use these spellings in titles and summaries. Never add a term that is not in the transcript.
+
+{{ .Glossary }}
+{{- end }}
 
 ## Your task
 

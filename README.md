@@ -78,6 +78,7 @@ segments). Defaults are embedded in the binary
 | ------------------- | -------------------------------------------------------------- |
 | `languages`         | Languages spoken (e.g. `["Swedish", "English"]`)               |
 | `fillerWords`       | Filler words to strip during cleanup                           |
+| `glossaryFile`      | Path to a Markdown term list rendered into the cleanup and summarize prompts. Empty disables it. The file is user data, so a missing file warns and continues |
 | `owner.role`        | Role framing for summarize intro (e.g. `"software engineer"`)  |
 | `owner.summaryFor`  | Summary destination (e.g. `"a human inbox"`)                   |
 | `includeInSummary`  | Bullet list of what to capture in summaries                    |

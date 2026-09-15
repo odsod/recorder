@@ -126,6 +126,7 @@ func finalize(cfg Config) (Config, error) {
 	cfg.PromptPaths.Cleanup = expandHome(cfg.PromptPaths.Cleanup)
 	cfg.PromptPaths.Summarize = expandHome(cfg.PromptPaths.Summarize)
 	cfg.PromptPaths.Combine = expandHome(cfg.PromptPaths.Combine)
+	cfg.PromptVars.GlossaryFile = expandHome(cfg.PromptVars.GlossaryFile)
 	cfg.PromptVars = mergePromptVars(cfg.PromptVars, defaultPromptVars())
 
 	prompts, err := resolvePrompts(cfg.PromptPaths, cfg.PromptVars)
